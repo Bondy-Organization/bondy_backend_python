@@ -1,0 +1,9 @@
+# Variáveis de Ambiente para o Projeto de Chat
+# Copie este arquivo para um novo arquivo chamado .env e preencha com suas credenciais locais.
+# O arquivo .env não deve ser enviado para o GitHub.
+
+DB_USER=postgres
+DB_PASSWORD=coloque_sua_senha_do_postgres_aqui
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=chat_app_db
