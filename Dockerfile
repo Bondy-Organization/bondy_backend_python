@@ -16,8 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Expõe a porta que seu servidor HTTP está escutando
-# É CRUCIAL que esta porta corresponda à porta que seu script Python usa (8080)
-EXPOSE 8080
+# É CRUCIAL que esta porta corresponda à porta que seu script Python usa (8083)
+EXPOSE 8083
 
 # Comando para iniciar sua aplicação quando o contêiner for executado
 # Substitua 'manual_http_server.py' pelo nome real do seu arquivo principal

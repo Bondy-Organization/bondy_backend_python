@@ -16,7 +16,7 @@ primary_region = "gru" # Exemplo: São Paulo
   # Variáveis de ambiente que sua aplicação Python lerá.
   # A porta é definida aqui e seu código Python deve lê-la (os.getenv('PORT', 8080)).
   # O Fly.io injeta a PORT automaticamente, mas é bom ter aqui para clareza.
-  PORT = "8080"
+  PORT = "8083"
   IS_ACTIVE = "true" # Ou "false", dependendo do estado inicial desejado
   # PEER_URL = "https://url-do-seu-outro-servico-peer.fly.dev" # Descomente e configure se tiver um peer
 
