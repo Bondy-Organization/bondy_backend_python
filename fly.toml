@@ -1,0 +1,58 @@
+# Nome da sua aplicação no Fly.io. Escolha um nome único e significativo.
+app = "your-python-status-server-name" # <-- MUITO IMPORTANTE: Mude este nome!
+
+# Região primária onde sua aplicação será implantada.
+# Escolha a mais próxima dos seus usuários para menor latência.
+# Exemplos: "gru" (São Paulo), "iad" (Ashburn, EUA), "fra" (Frankfurt, Alemanha)
+primary_region = "gru" # Exemplo: São Paulo
+
+[build]
+  # O Fly.io detectará automaticamente o Dockerfile na raiz.
+  # Você pode especificar 'builder = "paketobuildpacks/builder-python"' se não usar Dockerfile,
+  # mas com Dockerfile, esta seção é mais simples.
+  dockerfile = "Dockerfile"
+
+[env]
+  # Variáveis de ambiente que sua aplicação Python lerá.
+  # A porta é definida aqui e seu código Python deve lê-la (os.getenv('PORT', 8080)).
+  # O Fly.io injeta a PORT automaticamente, mas é bom ter aqui para clareza.
+  PORT = "8080"
+  IS_ACTIVE = "true" # Ou "false", dependendo do estado inicial desejado
+  # PEER_URL = "https://url-do-seu-outro-servico-peer.fly.dev" # Descomente e configure se tiver um peer
+
+[[services]]
+  # Configuração para o serviço HTTP/TCP que sua aplicação expõe.
+  protocol = "tcp" # Seu servidor é TCP, mesmo que fale HTTP
+  internal_port = 8080 # A porta que seu aplicativo escuta DENTRO do contêiner (deve ser a mesma do EXPOSE no Dockerfile)
+  
+  [[services.ports]]
+    port = 80 # Porta externa para HTTP
+    handlers = ["http"] # Roteia tráfego HTTP para esta porta
+  
+  [[services.ports]]
+    port = 443 # Porta externa para HTTPS
+    handlers = ["tls", "http"] # Roteia tráfego HTTPS para esta porta
+
+  [services.concurrency]
+    # Limites de concorrência. Ajuste conforme a necessidade.
+    # soft_limit: número de conexões/requisições antes de começar a escalar (se houver mais instâncias)
+    # hard_limit: número máximo de conexões/requisições por instância antes de recusar
+    type = "connections" # Ou "requests" se for um servidor HTTP mais tradicional
+    soft_limit = 25
+    hard_limit = 50
+
+  [[services.tcp_checks]]
+    # Health check TCP simples: verifica se a porta está aberta.
+    interval = "10s" # Verifica a cada 10 segundos
+    timeout = "2s"   # Espera 2 segundos por uma resposta
+    grace_period = "5s" # Tempo para o serviço iniciar antes de começar os checks
+
+  [[services.http_checks]]
+    # Health check HTTP: verifica o endpoint /health da sua aplicação.
+    interval = "10s"
+    timeout = "5s"
+    grace_period = "5s"
+    path = "/health" # O endpoint de health check que você implementou
+    method = "GET"
+    tls_skip_verify = false
+    headers = { "User-Agent" = "Fly-Health-Check" }
