@@ -1,1 +1,10 @@
+node_modules
+.DS_Store
+.vscode
+# Ignorar o arquivo de variáveis de ambiente com segredos
 .env
+# Ignorar a pasta do ambiente virtual
+venv/
+# Ignorar arquivos de cache do Python
+__pycache__/
+*.pyc
