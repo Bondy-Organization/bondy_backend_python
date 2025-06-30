@@ -3,7 +3,7 @@ import threading
 import requests
 import socket # For raw socket programming
 import json   # For handling JSON responses 
-
+ 
 # --- Global State Variables ---
 # These variables hold the system's operational status.
 # A threading.Lock is used to ensure thread-safe access to these shared variables
@@ -15,9 +15,39 @@ _is_active = os.getenv('IS_ACTIVE', 'false').lower() == 'true' # Active in a clu
 _peer_url = os.getenv('PEER_URL', None) # URL of a peer system for active/passive sync
 
 # --- Event Notification Mechanism ---
-# This condition variable is used to notify waiting clients when a state change occurs.
-# It shares the same lock (_state_lock) to ensure consistent state access.
-state_change_condition = threading.Condition(state_lock)
+# Dictionary to store condition variables for different groups
+# Each group has its own condition variable for targeted notifications
+group_conditions = {}
+group_conditions_lock = threading.Lock()  # Protects the group_conditions dictionary
+
+def get_or_create_group_condition(group_name):
+    """
+    Gets or creates a condition variable for a specific group.
+    Thread-safe creation of condition variables.
+    """
+    with group_conditions_lock:
+        if group_name not in group_conditions:
+            group_conditions[group_name] = threading.Condition(state_lock)
+        return group_conditions[group_name]
+
+def get_active_groups():
+    """
+    Returns a list of currently active group names.
+    Useful for debugging and monitoring.
+    """
+    with group_conditions_lock:
+        return list(group_conditions.keys())
+
+def remove_group_condition(group_name):
+    """
+    Removes a group condition variable. Use with caution.
+    Should only be called when you're sure no threads are waiting on it.
+    """
+    with group_conditions_lock:
+        if group_name in group_conditions:
+            del group_conditions[group_name]
+            return True
+        return False
 
 # --- Helper functions for thread-safe access to global state ---
 
@@ -51,13 +81,23 @@ def set_is_active(val):
             print(f"State Change: _is_active changed from {old_is_active} to {_is_active}. Notifying clients.")
             notify_clients_of_state_change()
 
-def notify_clients_of_state_change():
+def notify_clients_of_state_change(group_name=None):
     """
-    Notifies all threads waiting on the state_change_condition that a state has changed.
-    This wakes up long-polling clients.
+    Notifies all threads waiting on condition variables that a state has changed.
+    If group_name is specified, only notifies that specific group.
+    If group_name is None, notifies all groups.
     """
-    with state_change_condition: # Acquire lock before notifying
-        state_change_condition.notify_all() # Wake up all waiting threads
+    with group_conditions_lock:
+        if group_name:
+            # Notify only the specific group
+            if group_name in group_conditions:
+                with group_conditions[group_name]:
+                    group_conditions[group_name].notify_all()
+        else:
+            # Notify all groups
+            for condition in group_conditions.values():
+                with condition:
+                    condition.notify_all()
 
 # --- SyncManager Class (runs in a separate thread) ---
 class SyncManager(threading.Thread):
@@ -207,13 +247,23 @@ def handle_client(client_socket, addr):
             # body = request_info['body'] # Not used for this logic, but available
 
             # --- Middleware Logic ---
-            allowed_paths = ['/health', '/fall', '/revive', '/subscribe/status'] # Added long-polling path
+            allowed_paths = ['/health', '/fall', '/revive', '/groups', '/users'] # Base allowed paths
+            # Also allow /subscribe/status, /subscribe/user, /notify/, and /user/ with optional query parameters
+            subscribe_patterns = ['/subscribe/status', '/subscribe/user', '/notify/', '/user/']
             
             is_allowed_by_middleware = False
+            # Check exact matches first
             for allowed_path in allowed_paths:
                 if path == allowed_path: 
                     is_allowed_by_middleware = True
                     break
+            
+            # Check subscribe patterns (allowing query parameters)
+            if not is_allowed_by_middleware:
+                for pattern in subscribe_patterns:
+                    if path.startswith(pattern):
+                        is_allowed_by_middleware = True
+                        break
 
             if (not get_is_alive() or not get_is_active()) and not is_allowed_by_middleware:
                 print(f"[{threading.current_thread().name}] Request to {path} blocked: System not available (isAlive={get_is_alive()}, isActive={get_is_active()})")
@@ -238,37 +288,117 @@ def handle_client(client_socket, addr):
                     status_code = 200 
                     response_bytes = format_http_response(status_code, '?', html)
                     client_socket.sendall(response_bytes)
-                elif path == '/subscribe/status':
-                    # --- Long-Polling Logic ---
-                    # We send an initial response only if there's a state change during the wait.
-                    # Otherwise, we signal "no change" after timeout.
+                elif path == '/groups':
+                    # List all active groups
+                    active_groups = get_active_groups()
+                    response_data = {'active_groups': active_groups, 'count': len(active_groups)}
+                    response_bytes = format_http_response(status_code, 'application/json', response_data)
+                    client_socket.sendall(response_bytes)
+                elif path == '/users':
+                    # List all users and their groups
+                    all_user_groups = get_all_user_groups()
+                    response_data = {'user_groups': all_user_groups, 'user_count': len(all_user_groups)}
+                    response_bytes = format_http_response(status_code, 'application/json', response_data)
+                    client_socket.sendall(response_bytes)
+                elif path.startswith('/user/'):
+                    # Get specific user's groups: GET /user/{user_id}/groups
+                    path_parts = path.split('/')
+                    if len(path_parts) >= 3:
+                        user_id = path_parts[2]
+                        if len(path_parts) >= 4 and path_parts[3] == 'groups':
+                            user_groups_list = list(get_user_groups(user_id))
+                            response_data = {'user_id': user_id, 'groups': user_groups_list}
+                            response_bytes = format_http_response(status_code, 'application/json', response_data)
+                            client_socket.sendall(response_bytes)
+                        else:
+                            status_code = 404
+                            response_data = {'error': 'Invalid user endpoint. Use /user/{user_id}/groups'}
+                            response_bytes = format_http_response(status_code, 'application/json', response_data)
+                            client_socket.sendall(response_bytes)
+                    else:
+                        status_code = 400
+                        response_data = {'error': 'Invalid user path format'}
+                        response_bytes = format_http_response(status_code, 'application/json', response_data)
+                        client_socket.sendall(response_bytes)
+                elif path.startswith('/subscribe/status'):
+                    # --- Long-Polling Logic with Group Support ---
+                    # Extract group from query parameters or use default
+                    group_name = "default"  # Default group
+                    if '?' in path:
+                        query_part = path.split('?', 1)[1]
+                        for param in query_part.split('&'):
+                            if param.startswith('group='):
+                                group_name = param.split('=', 1)[1]
+                                break
                     
-                    # Store initial state for comparison (optional, but good for client to know what they saw last)
-                    # For simplicity here, we always send the current state if notified or on timeout.
+                    print(f"[{threading.current_thread().name}] Client {addr} started long-polling for status changes in group '{group_name}'.")
                     
-                    print(f"[{threading.current_thread().name}] Client {addr} started long-polling for status changes.")
+                    # Get or create the condition variable for this group
+                    group_condition = get_or_create_group_condition(group_name)
                     
                     # Acquire lock before waiting on condition. Wait up to 25 seconds.
                     # The condition variable will release the lock while waiting and re-acquire it upon waking.
-                    with state_change_condition:
+                    with group_condition:
                         # Wait for a notification OR for the timeout to expire
                         # This returns True if notified, False if timed out.
-                        notified = state_change_condition.wait(timeout=25) 
+                        notified = group_condition.wait(timeout=25) 
                     
                     is_alive_val = get_is_alive() # Get latest state after waiting
                     is_active_val = get_is_active() # Get latest state after waiting
 
                     if notified:
-                        print(f"[{threading.current_thread().name}] Notified of state change for {addr}. Sending current status.")
-                        response_data = {'status': 'alive' if is_alive_val else 'down', 'active': is_active_val, 'change': True}
+                        print(f"[{threading.current_thread().name}] Notified of state change for {addr} in group '{group_name}'. Sending current status.")
+                        response_data = {'status': 'alive' if is_alive_val else 'down', 'active': is_active_val, 'change': True, 'group': group_name}
                         status_code = 200
                         response_bytes = format_http_response(status_code, 'application/json', response_data)
                         client_socket.sendall(response_bytes)
                     else:
-                        print(f"[{threading.current_thread().name}] Long-poll timeout for {addr}. No state change. Sending 204.")
+                        print(f"[{threading.current_thread().name}] Long-poll timeout for {addr} in group '{group_name}'. No state change. Sending 204.")
                         # Send 204 No Content if no change within timeout
                         response_bytes = format_http_response(204, 'application/json', None) 
                         client_socket.sendall(response_bytes)
+                elif path.startswith('/subscribe/user'):
+                    # --- User-based Multi-Group Subscription ---
+                    # Extract user_id from query parameters
+                    user_id = None
+                    if '?' in path:
+                        query_part = path.split('?', 1)[1]
+                        for param in query_part.split('&'):
+                            if param.startswith('user_id='):
+                                user_id = param.split('=', 1)[1]
+                                break
+                    
+                    if not user_id:
+                        status_code = 400
+                        response_data = {'error': 'user_id parameter is required'}
+                        response_bytes = format_http_response(status_code, 'application/json', response_data)
+                        client_socket.sendall(response_bytes)
+                    else:
+                        print(f"[{threading.current_thread().name}] Client {addr} started user-based long-polling for user '{user_id}'.")
+                        
+                        # Wait for notifications on any of the user's groups
+                        notified, notified_group, user_group_list = wait_for_user_group_notifications(user_id, timeout=25)
+                        
+                        is_alive_val = get_is_alive()
+                        is_active_val = get_is_active()
+
+                        if notified:
+                            print(f"[{threading.current_thread().name}] User '{user_id}' notified of change in group '{notified_group}'. Sending current status.")
+                            response_data = {
+                                'status': 'alive' if is_alive_val else 'down', 
+                                'active': is_active_val, 
+                                'change': True, 
+                                'user_id': user_id,
+                                'notified_group': notified_group,
+                                'user_groups': user_group_list
+                            }
+                            status_code = 200
+                            response_bytes = format_http_response(status_code, 'application/json', response_data)
+                            client_socket.sendall(response_bytes)
+                        else:
+                            print(f"[{threading.current_thread().name}] Long-poll timeout for user '{user_id}'. No state change. Sending 204.")
+                            response_bytes = format_http_response(204, 'application/json', None)
+                            client_socket.sendall(response_bytes)
                 else: # Unhandled GET paths
                     if get_is_alive() and get_is_active():
                         status_code = 404
@@ -289,6 +419,59 @@ def handle_client(client_socket, addr):
                     set_is_alive(True) # This will trigger notify_clients_of_state_change()
                     print(f"[{threading.current_thread().name}] System status set to REVIVED (isAlive=True).")
                     response_data = {'status': 'system revived', 'active': get_is_active()}
+                elif path.startswith('/notify/'):
+                    # New endpoint to trigger notifications for specific groups
+                    # Example: POST /notify/group1 or POST /notify/all
+                    path_parts = path.split('/')
+                    if len(path_parts) >= 3:
+                        group_target = path_parts[2]
+                        if group_target == 'all':
+                            notify_clients_of_state_change()  # Notify all groups
+                            print(f"[{threading.current_thread().name}] Triggered notification for ALL groups.")
+                            response_data = {'message': 'notification sent to all groups'}
+                        else:
+                            notify_clients_of_state_change(group_target)  # Notify specific group
+                            print(f"[{threading.current_thread().name}] Triggered notification for group '{group_target}'.")
+                            response_data = {'message': f'notification sent to group {group_target}'}
+                    else:
+                        status_code = 400
+                        response_data = {'error': 'Invalid notify path. Use /notify/{group_name} or /notify/all'}
+                elif path.startswith('/user/'):
+                    # User-group management endpoints
+                    # POST /user/{user_id}/groups - Set user's groups (from JSON body)
+                    # POST /user/{user_id}/groups/{group_name} - Add user to group
+                    path_parts = path.split('/')
+                    if len(path_parts) >= 4:
+                        user_id = path_parts[2]
+                        if path_parts[3] == 'groups':
+                            if len(path_parts) == 4:
+                                # POST /user/{user_id}/groups - Set user's groups from JSON body
+                                body = request_info.get('body')
+                                if isinstance(body, dict) and 'groups' in body:
+                                    group_names = body['groups']
+                                    if isinstance(group_names, list):
+                                        set_user_groups(user_id, group_names)
+                                        print(f"[{threading.current_thread().name}] Set groups for user '{user_id}': {group_names}")
+                                        response_data = {'user_id': user_id, 'groups': group_names, 'message': 'groups updated'}
+                                    else:
+                                        status_code = 400
+                                        response_data = {'error': 'groups must be an array'}
+                                else:
+                                    status_code = 400
+                                    response_data = {'error': 'JSON body with groups array required'}
+                            elif len(path_parts) >= 5:
+                                # POST /user/{user_id}/groups/{group_name} - Add user to group
+                                group_name = path_parts[4]
+                                add_user_to_group(user_id, group_name)
+                                print(f"[{threading.current_thread().name}] Added user '{user_id}' to group '{group_name}'")
+                                user_groups_list = list(get_user_groups(user_id))
+                                response_data = {'user_id': user_id, 'added_to_group': group_name, 'all_groups': user_groups_list}
+                        else:
+                            status_code = 400
+                            response_data = {'error': 'Invalid user endpoint. Use /user/{user_id}/groups'}
+                    else:
+                        status_code = 400
+                        response_data = {'error': 'Invalid user path format'}
                 else: # Unhandled POST paths
                     if get_is_alive() and get_is_active():
                         status_code = 404
@@ -298,6 +481,29 @@ def handle_client(client_socket, addr):
                         response_data = {'error': 'system not available'}
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
+            elif method == 'DELETE':
+                if path.startswith('/user/'):
+                    # DELETE /user/{user_id}/groups/{group_name} - Remove user from group
+                    path_parts = path.split('/')
+                    if len(path_parts) >= 5 and path_parts[3] == 'groups':
+                        user_id = path_parts[2]
+                        group_name = path_parts[4]
+                        remove_user_from_group(user_id, group_name)
+                        print(f"[{threading.current_thread().name}] Removed user '{user_id}' from group '{group_name}'")
+                        user_groups_list = list(get_user_groups(user_id))
+                        response_data = {'user_id': user_id, 'removed_from_group': group_name, 'remaining_groups': user_groups_list}
+                        response_bytes = format_http_response(status_code, 'application/json', response_data)
+                        client_socket.sendall(response_bytes)
+                    else:
+                        status_code = 400
+                        response_data = {'error': 'Invalid DELETE path. Use /user/{user_id}/groups/{group_name}'}
+                        response_bytes = format_http_response(status_code, 'application/json', response_data)
+                        client_socket.sendall(response_bytes)
+                else:
+                    status_code = 404
+                    response_data = {'error': 'Not Found'}
+                    response_bytes = format_http_response(status_code, 'application/json', response_data)
+                    client_socket.sendall(response_bytes)
             else: # Unhandled methods
                 if get_is_alive() and get_is_active():
                     status_code = 404
@@ -321,6 +527,144 @@ def handle_client(client_socket, addr):
     finally:
         print(f"[{threading.current_thread().name}] Fechando conexão com {addr}.")
         client_socket.close()
+
+# --- User-Group Management ---
+# Dictionary to store user group memberships
+user_groups = {}  # user_id -> set of group_names
+user_groups_lock = threading.Lock()
+
+def get_user_groups(user_id):
+    """
+    Gets the groups that a user belongs to.
+    Returns a set of group names.
+    """
+    with user_groups_lock:
+        return user_groups.get(user_id, set()).copy()
+
+def add_user_to_group(user_id, group_name):
+    """
+    Adds a user to a group.
+    """
+    with user_groups_lock:
+        if user_id not in user_groups:
+            user_groups[user_id] = set()
+        user_groups[user_id].add(group_name)
+
+def remove_user_from_group(user_id, group_name):
+    """
+    Removes a user from a group.
+    """
+    with user_groups_lock:
+        if user_id in user_groups:
+            user_groups[user_id].discard(group_name)
+            if not user_groups[user_id]:  # Remove user if no groups left
+                del user_groups[user_id]
+
+def set_user_groups(user_id, group_names):
+    """
+    Sets all groups for a user (replaces existing groups).
+    """
+    with user_groups_lock:
+        if group_names:
+            user_groups[user_id] = set(group_names)
+        elif user_id in user_groups:
+            del user_groups[user_id]
+
+def get_all_users_in_group(group_name):
+    """
+    Gets all users that belong to a specific group.
+    """
+    with user_groups_lock:
+        return [user_id for user_id, groups in user_groups.items() if group_name in groups]
+
+def get_all_user_groups():
+    """
+    Returns a copy of the entire user-group mapping.
+    """
+    with user_groups_lock:
+        return {user_id: groups.copy() for user_id, groups in user_groups.items()}
+
+def wait_for_user_group_notifications(user_id, timeout=25):
+    """
+    Waits for notifications on any of the groups that a user belongs to.
+    Returns (notified, group_that_notified, user_groups).
+    """
+    user_group_list = list(get_user_groups(user_id))
+    
+    if not user_group_list:
+        # User has no groups, return immediately
+        return False, None, []
+    
+    # Create condition variables for all user groups
+    conditions = []
+    for group_name in user_group_list:
+        conditions.append(get_or_create_group_condition(group_name))
+    
+    # Use a shared event to coordinate between multiple condition waits
+    notification_event = threading.Event()
+    notified_group = threading.local()
+    notified_group.value = None
+    
+    def wait_on_condition(condition, group_name):
+        """Helper function to wait on a single condition"""
+        try:
+            with condition:
+                if condition.wait(timeout=timeout):
+                    notified_group.value = group_name
+                    notification_event.set()
+        except Exception as e:
+            print(f"Error waiting on condition for group {group_name}: {e}")
+    
+    # Start threads to wait on each condition
+    wait_threads = []
+    for condition, group_name in zip(conditions, user_group_list):
+        thread = threading.Thread(
+            target=wait_on_condition, 
+            args=(condition, group_name),
+            name=f"GroupWaiter-{group_name}"
+        )
+        thread.daemon = True
+        thread.start()
+        wait_threads.append(thread)
+    
+    # Wait for either a notification or timeout
+    notified = notification_event.wait(timeout=timeout)
+    
+    # Clean up - try to join threads quickly
+    for thread in wait_threads:
+        thread.join(timeout=0.1)
+    
+    return notified, getattr(notified_group, 'value', None), user_group_list
+
+# --- Enhanced Group Functions ---
+
+def enhanced_notify_clients_of_state_change(group_name=None):
+    """
+    Enhanced notification function that also considers user-group memberships.
+    Notifies all threads waiting on condition variables that a state has changed.
+    If group_name is specified, only notifies that specific group.
+    If group_name is None, notifies all groups.
+    """
+    with group_conditions_lock:
+        if group_name:
+            # Notify only the specific group
+            if group_name in group_conditions:
+                with group_conditions[group_name]:
+                    group_conditions[group_name].notify_all()
+            
+            # Also notify users in this group
+            users_in_group = get_all_users_in_group(group_name)
+            for user_id in users_in_group:
+                user_groups = get_user_groups(user_id)
+                for user_group in user_groups:
+                    if user_group != group_name: # Avoid notifying the same group twice
+                        with group_conditions[user_group]:
+                            group_conditions[user_group].notify_all()
+        else:
+            # Notify all groups
+            for condition in group_conditions.values():
+                with condition:
+                    condition.notify_all()
 
 # --- Main Server Loop ---
 def start_server_manual_http():

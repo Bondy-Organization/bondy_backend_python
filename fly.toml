@@ -1,5 +1,5 @@
 # Nome da sua aplicação no Fly.io. Escolha um nome único e significativo.
-app = "your-python-status-server-name" # <-- MUITO IMPORTANTE: Mude este nome!
+app = "bondy-backend-python" # <-- MUITO IMPORTANTE: Mude este nome!
 
 # Região primária onde sua aplicação será implantada.
 # Escolha a mais próxima dos seus usuários para menor latência.

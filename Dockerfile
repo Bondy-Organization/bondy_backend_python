@@ -21,4 +21,4 @@ EXPOSE 8080
 
 # Comando para iniciar sua aplicação quando o contêiner for executado
 # Substitua 'manual_http_server.py' pelo nome real do seu arquivo principal
-CMD ["python", "manual_http_server.py"]
+CMD ["python", "main.py"]
