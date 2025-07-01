@@ -1,56 +1,39 @@
-# main.py (VERSÃO MÍNIMA PARA TESTE DE DEPLOY)
+# main.py (VERSÃO ULTRA-SIMPLIFICADA PARA TESTE DE CONECTIVIDADE)
 import os
 import socket
 import threading
-import json
+import time # Para um pequeno atraso
 
 # Configuração da porta
-# O Render injeta a PORT. Se não estiver lá, isso vai falhar, o que é bom para depurar.
 PORT = int(os.environ.get('PORT'))
 HOST = '0.0.0.0'
 
-# Função para formatar resposta HTTP
-def format_http_response(status_code, content_type, body_data):
-    body_bytes = json.dumps(body_data).encode('utf-8') if isinstance(body_data, dict) else str(body_data).encode('utf-8')
-    response_lines = [
-        f"HTTP/1.1 {status_code} {('OK' if status_code == 200 else 'Not Found' if status_code == 404 else 'Service Unavailable')}",
-        f"Content-Type: {content_type}",
-        f"Content-Length: {len(body_bytes)}",
-        "Connection: close",
-        "",
-    ]
-    return "\r\n".join(response_lines).encode('utf-8') + body_bytes
+# Resposta HTTP fixa para qualquer requisição
+FIXED_RESPONSE = b"HTTP/1.1 200 OK\r\n" \
+                 b"Content-Type: text/plain\r\n" \
+                 b"Content-Length: 12\r\n" \
+                 b"Connection: close\r\n" \
+                 b"\r\n" \
+                 b"Hello Render!"
 
 # Handler de cliente
 def handle_client(client_socket, addr):
     try:
-        raw_request_data = client_socket.recv(4096)
-        if not raw_request_data: return
-
-        request_line = raw_request_data.decode('utf-8').split('\r\n')[0]
-        method = request_line.split(' ')[0]
-        path = request_line.split(' ')[1]
-
-        print(f"Received {method} {path} from {addr}")
-
-        # Responde 200 OK para /health (GET e HEAD) e para / (HEAD)
-        if (method == 'GET' and path == '/health') or \
-           (method == 'HEAD' and (path == '/' or path == '/health')):
-            response_data = {'status': 'alive', 'active': True}
-            response_bytes = format_http_response(200, 'application/json', response_data)
-            client_socket.sendall(response_bytes)
-        elif method == 'GET' and path == '/home':
-            html_content = "<html><body><h1>Hello from Render!</h1></body></html>"
-            response_bytes = format_http_response(200, 'text/html', html_content)
-            client_socket.sendall(response_bytes)
-        else:
-            response_bytes = format_http_response(404, 'application/json', {'error': 'Not Found'})
-            client_socket.sendall(response_bytes)
+        # Apenas tenta ler algo para consumir a requisição, não precisa parsear
+        client_socket.recv(4096) 
+        print(f"Received request from {addr}. Sending fixed response.")
+        
+        # Envia a resposta fixa
+        client_socket.sendall(FIXED_RESPONSE)
+        
+        # Adiciona um pequeno atraso antes de fechar o socket (pode ajudar com proxies)
+        time.sleep(0.1) 
+        
     except Exception as e:
         print(f"Error handling client {addr}: {e}")
-        client_socket.sendall(format_http_response(500, 'application/json', {'error': 'Internal Server Error'}))
     finally:
         client_socket.close()
+        print(f"Connection with {addr} closed.")
 
 # Loop principal do servidor
 def start_server():
@@ -58,7 +41,7 @@ def start_server():
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind((HOST, PORT))
     server_socket.listen(5)
-    print(f"Test Server listening on http://{HOST}:{PORT}/")
+    print(f"ULTRA-SIMPLE Server listening on http://{HOST}:{PORT}/")
 
     while True:
         conn, addr = server_socket.accept()
