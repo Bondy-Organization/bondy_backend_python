@@ -205,6 +205,8 @@ def format_http_response(status_code, content_type, body_data):
     Manually formats an HTTP response.
     Returns bytes ready to be sent over the socket.
     """
+    print(f"DEBUG format_http_response: status={status_code}, content_type={content_type}, body_data={body_data}")
+    
     status_message = HTTP_STATUS_CODES.get(status_code, "Unknown Status")
     
     # Only serialize body_data if it's not None and status_code is not 204 (No Content)
@@ -212,17 +214,21 @@ def format_http_response(status_code, content_type, body_data):
     if body_data is not None and status_code != 204:
         body_bytes = json.dumps(body_data).encode('utf-8') if isinstance(body_data, dict) else str(body_data).encode('utf-8')
     
+    print(f"DEBUG: body_bytes length: {len(body_bytes)}")
+    
     response_lines = [
         f"HTTP/1.1 {status_code} {status_message}",
-        f"Content-Type: {content_type}",
+        f"Content-Type: {content_type}", 
         f"Content-Length: {len(body_bytes)}",
         "Connection: close", # Simple connection handling for this example
         "", # Empty line separating headers from body
     ]
     
     response_header = "\r\n".join(response_lines).encode('utf-8')
+    result = response_header + body_bytes
     
-    return response_header + body_bytes
+    print(f"DEBUG: Final response length: {len(result)} bytes")
+    return result
 
 # --- Client Handler (runs in a separate thread for each client) ---
 def handle_client(client_socket, addr):
@@ -230,20 +236,27 @@ def handle_client(client_socket, addr):
     Handles a single client connection.
     Reads request, applies middleware, routes, and sends response.
     """
-    print(f"[{threading.current_thread().name}] Cliente conectado: {addr}")
+    print(f"[{threading.current_thread().name}] DEBUG: Cliente conectado: {addr}")
     try:
         # Read the initial request
+        print(f"[{threading.current_thread().name}] DEBUG: Setting socket timeout to 10 seconds")
         client_socket.settimeout(10) # Short timeout for initial request read
+        
+        print(f"[{threading.current_thread().name}] DEBUG: Waiting to receive data from {addr}")
         raw_request_data = client_socket.recv(4096) 
         
         if not raw_request_data:
-            print(f"[{threading.current_thread().name}] No data from {addr}, closing.")
+            print(f"[{threading.current_thread().name}] DEBUG: No data from {addr}, closing.")
             return
 
+        print(f"[{threading.current_thread().name}] DEBUG: Received {len(raw_request_data)} bytes from {addr}")
+
         try:
+            print(f"[{threading.current_thread().name}] DEBUG: Parsing HTTP request")
             request_info = parse_http_request(raw_request_data)
             method = request_info['method']
             path = request_info['path']
+            print(f"[{threading.current_thread().name}] DEBUG: Parsed request - method={method}, path={path}")
             # body = request_info['body'] # Not used for this logic, but available
 
             # --- Middleware Logic ---
@@ -277,12 +290,17 @@ def handle_client(client_socket, addr):
 
             if method == 'GET':
                 if path == '/health':
+                    print(f"[{threading.current_thread().name}] DEBUG: Processing /health request")
                     is_alive_val = get_is_alive()
                     is_active_val = get_is_active()
+                    print(f"[{threading.current_thread().name}] DEBUG: State - alive={is_alive_val}, active={is_active_val}")
                     response_data = {'status': 'alive' if is_alive_val else 'down', 'active': is_active_val}
                     status_code = 200 if is_alive_val else 503
+                    print(f"[{threading.current_thread().name}] DEBUG: Response prepared - status={status_code}, data={response_data}")
                     response_bytes = format_http_response(status_code, 'application/json', response_data)
+                    print(f"[{threading.current_thread().name}] DEBUG: Sending response, length={len(response_bytes)}")
                     client_socket.sendall(response_bytes)
+                    print(f"[{threading.current_thread().name}] DEBUG: /health response sent successfully")
                 elif path == "/home":
                     html = "<html> <body>Chat</body> </html>"
                     status_code = 200 
@@ -515,18 +533,26 @@ def handle_client(client_socket, addr):
                 client_socket.sendall(response_bytes)
 
         except ValueError as e:
-            print(f"[{threading.current_thread().name}] Bad Request from {addr}: {e}")
+            print(f"[{threading.current_thread().name}] ERROR: Bad Request from {addr}: {e}")
             response_bytes = format_http_response(400, 'application/json', {'error': 'Bad Request'})
             client_socket.sendall(response_bytes)
         except socket.timeout:
-            print(f"[{threading.current_thread().name}] Socket timeout for {addr} (initial read).")
+            print(f"[{threading.current_thread().name}] ERROR: Socket timeout for {addr} (initial read).")
         except Exception as e:
-            print(f"[{threading.current_thread().name}] Erro ao lidar com cliente {addr}: {e}")
-            response_bytes = format_http_response(500, 'application/json', {'error': 'Internal Server Error'})
-            client_socket.sendall(response_bytes)
+            print(f"[{threading.current_thread().name}] ERROR: Exception handling client {addr}: {e}")
+            import traceback
+            traceback.print_exc()
+            try:
+                response_bytes = format_http_response(500, 'application/json', {'error': 'Internal Server Error'})
+                client_socket.sendall(response_bytes)
+            except:
+                print(f"[{threading.current_thread().name}] ERROR: Failed to send error response to {addr}")
     finally:
-        print(f"[{threading.current_thread().name}] Fechando conexão com {addr}.")
-        client_socket.close()
+        print(f"[{threading.current_thread().name}] DEBUG: Closing connection with {addr}.")
+        try:
+            client_socket.close()
+        except:
+            print(f"[{threading.current_thread().name}] ERROR: Failed to close socket for {addr}")
 
 # --- User-Group Management ---
 # Dictionary to store user group memberships
@@ -675,21 +701,36 @@ def start_server_manual_http():
     port = int(os.getenv('PORT', 8083))
     host = '0.0.0.0' # Listen on all interfaces
 
+    print(f"DEBUG: Starting server initialization...")
+    print(f"DEBUG: Environment PORT={os.getenv('PORT')}, using port={port}")
+    print(f"DEBUG: Binding to host={host}")
+
     server_socket = None
     try:
+        print(f"DEBUG: Creating socket...")
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        
+        print(f"DEBUG: Attempting to bind to {host}:{port}")
         server_socket.bind((host, port))
+        
+        print(f"DEBUG: Starting to listen...")
         server_socket.listen(5) # Max 5 queued connections
-        print(f"HTTP Server manual escutando em http://{host}:{port}/")
+        
+        print(f"SUCCESS: HTTP Server listening on http://{host}:{port}/")
+        print(f"DEBUG: Server ready to accept connections")
 
         while True: # Main loop for accepting connections
+            print(f"DEBUG: Waiting for connection...")
             conn, addr = server_socket.accept() # Blocks until a new connection
+            print(f"DEBUG: Accepted connection from {addr}")
+            
             client_thread = threading.Thread(target=handle_client, args=(conn, addr), name=f"ClientHTTPHandler-{addr[0]}:{addr[1]}")
             # The client threads are daemon threads, meaning they will not prevent the main program from exiting
             # if only daemon threads are left. This is suitable for server handlers.
             client_thread.daemon = True 
             client_thread.start()
+            print(f"DEBUG: Started thread {client_thread.name} for {addr}")
 
     except OSError as e:
         if e.errno == 98:
@@ -707,16 +748,34 @@ def start_server_manual_http():
 
 # --- Main Execution Block ---
 if __name__ == '__main__':
+    print("="*50)
+    print("DEBUG: Application starting...")
+    print(f"DEBUG: Python version: {os.sys.version}")
+    print(f"DEBUG: Current working directory: {os.getcwd()}")
+    print(f"DEBUG: Environment variables:")
+    print(f"  PORT: {os.getenv('PORT', 'NOT SET')}")
+    print(f"  IS_ACTIVE: {os.getenv('IS_ACTIVE', 'NOT SET')}")
+    print(f"  PEER_URL: {os.getenv('PEER_URL', 'NOT SET')}")
+    print("="*50)
+    
     print(f"Initial State from Environment: IS_ACTIVE={os.getenv('IS_ACTIVE')}, PEER_URL={_peer_url}")
     print(f"Parsed Initial State: isAlive={get_is_alive()}, isActive={get_is_active()}")
     
     # Initialize Sync Manager
     sync_manager = SyncManager(get_is_alive, set_is_active, get_is_active, _peer_url)
     if _peer_url:
+        print(f"DEBUG: Starting SyncManager with peer URL: {_peer_url}")
         sync_manager.start()
+    else:
+        print("DEBUG: No PEER_URL set, skipping SyncManager")
 
     try:
+        print("DEBUG: About to start HTTP server...")
         start_server_manual_http()
+    except Exception as e:
+        print(f"FATAL ERROR: Exception in main: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         if _peer_url:
             print("Stopping SyncManager thread...")
