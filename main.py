@@ -304,7 +304,7 @@ def handle_client(client_socket, addr):
                 elif path == "/home":
                     html = "<html> <body>Chat</body> </html>"
                     status_code = 200 
-                    response_bytes = format_http_response(status_code, '?', html)
+                    response_bytes = format_http_response(status_code, 'text/html', html)
                     client_socket.sendall(response_bytes)
                 elif path == '/groups':
                     # List all active groups
