@@ -522,6 +522,45 @@ def handle_client(client_socket, addr):
                     response_data = {'error': 'Not Found'}
                     response_bytes = format_http_response(status_code, 'application/json', response_data)
                     client_socket.sendall(response_bytes)
+            elif method == 'HEAD': # <-- NOVO BLOCO PARA HEAD
+                if path == '/health':
+                    print(f"[{threading.current_thread().name}] DEBUG: Processing HEAD /health request (for health check)")
+                    is_alive_val = get_is_alive()
+                    is_active_val = get_is_active()
+                    # A resposta HEAD não tem corpo, mas os cabeçalhos são os mesmos do GET
+                    # format_http_response já lida com body_data=None para 204. Para HEAD, podemos enviar
+                    # um corpo vazio, mas o importante é que o método HEAD NÃO TEM CORPO.
+                    # O status code deve ser o mesmo do GET /health.
+                    status_code = 200 if is_alive_val else 503
+                    
+                    # Para HEAD, o corpo deve ser vazio, mas Content-Length deve ser 0
+                    # Modifique format_http_response para lidar com isso explicitamente se necessário.
+                    # No seu format_http_response atual, se body_data é None, body_bytes será b"", o que é bom.
+                    response_bytes = format_http_response(status_code, 'application/json', None) # Sem corpo para HEAD
+                    
+                    # Certifique-se de que o Content-Length seja 0 para HEAD
+                    # format_http_response já calcula isso com len(body_bytes)
+                    client_socket.sendall(response_bytes)
+                    print(f"[{threading.current_thread().name}] DEBUG: HEAD /health response sent successfully")
+                elif path == '/': # Plataformas podem checar a raiz com HEAD
+                    # Se o sistema está ok, responda 200 OK com corpo vazio para HEAD /
+                    if get_is_alive() and get_is_active():
+                        status_code = 200
+                        response_data = None # Sem corpo para HEAD
+                    else: # Se o sistema não está ativo, retorne 503 mesmo para HEAD /
+                        status_code = 503
+                        response_data = {'error': 'system not available'} # Pode ou não ter corpo dependendo da plataforma
+                    response_bytes = format_http_response(status_code, 'application/json', response_data)
+                    client_socket.sendall(response_bytes)
+                else: # Unhandled HEAD paths
+                    if get_is_alive() and get_is_active():
+                        status_code = 404
+                        response_data = {'error': 'Not Found'}
+                    else:
+                        status_code = 503
+                        response_data = {'error': 'system not available'}
+                    response_bytes = format_http_response(status_code, 'application/json', response_data)
+                    client_socket.sendall(response_bytes) 
             else: # Unhandled methods
                 if get_is_alive() and get_is_active():
                     status_code = 404
