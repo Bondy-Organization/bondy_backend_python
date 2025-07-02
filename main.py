@@ -212,22 +212,29 @@ def format_http_response(status_code, content_type, body_data):
     # Only serialize body_data if it's not None and status_code is not 204 (No Content)
     body_bytes = b""
     if body_data is not None and status_code != 204:
-        body_bytes = json.dumps(body_data).encode('utf-8') if isinstance(body_data, dict) else str(body_data).encode('utf-8')
+        if isinstance(body_data, dict):
+            body_bytes = json.dumps(body_data).encode('utf-8')
+        else:
+            body_bytes = str(body_data).encode('utf-8')
     
     print(f"DEBUG: body_bytes length: {len(body_bytes)}")
     
+    # Build HTTP response with proper CRLF line endings
     response_lines = [
         f"HTTP/1.1 {status_code} {status_message}",
-        f"Content-Type: {content_type}", 
-        f"Content-Length: {len(body_bytes)}",
-        "Connection: close", # Simple connection handling for this example
-        "", # Empty line separating headers from body
+        f"Content-Type: {content_type}",
+        f"Content-Length: {len(body_bytes)}", 
+        "Connection: close",
+        ""  # Empty line separating headers from body
     ]
     
+    # Join with \r\n (CRLF) for proper HTTP formatting
     response_header = "\r\n".join(response_lines).encode('utf-8')
     result = response_header + body_bytes
     
     print(f"DEBUG: Final response length: {len(result)} bytes")
+    print(f"DEBUG: Response headers: {response_header}")
+    return result
     return result
 
 # --- Client Handler (runs in a separate thread for each client) ---
@@ -292,12 +299,12 @@ def handle_client(client_socket, addr):
                 if path == '/':
                     FIXED_RESPONSE = b"HTTP/1.1 200 OK\r\n" \
                  b"Content-Type: text/plain\r\n" \
-                 b"Content-Length: 12\r\n" \
+                 b"Content-Length: 19\r\n" \
                  b"Connection: close\r\n" \
                  b"\r\n" \
                  b"Render Sanity check!"
                     client_socket.sendall(FIXED_RESPONSE)
-                if path == '/health':
+                elif path == '/health':
                     print(f"[{threading.current_thread().name}] DEBUG: Processing /health request")
                     is_alive_val = get_is_alive()
                     is_active_val = get_is_active()
@@ -830,4 +837,18 @@ if __name__ == '__main__':
             sync_manager.join(timeout=2)
             print("SyncManager thread stopped.")
         print("Application shut down cleanly.")
+
+# Test function to verify HTTP response format
+def test_format_http_response():
+    """Test the HTTP response formatting function"""
+    test_data = {'status': 'alive', 'active': True}
+    response_bytes = format_http_response(200, 'application/json', test_data)
+    response_str = response_bytes.decode('utf-8')
+    print("="*50)
+    print("TEST HTTP RESPONSE:")
+    print(repr(response_str))
+    print("="*50)
+    print("READABLE FORMAT:")
+    print(response_str)
+    print("="*50)
 
