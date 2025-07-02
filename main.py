@@ -205,37 +205,47 @@ def format_http_response(status_code, content_type, body_data):
     Manually formats an HTTP response.
     Returns bytes ready to be sent over the socket.
     """
-    print(f"DEBUG format_http_response: status={status_code}, content_type={content_type}, body_data={body_data}")
-    
-    status_message = HTTP_STATUS_CODES.get(status_code, "Unknown Status")
-    
-    # Only serialize body_data if it's not None and status_code is not 204 (No Content)
-    body_bytes = b""
-    if body_data is not None and status_code != 204:
-        if isinstance(body_data, dict):
-            body_bytes = json.dumps(body_data).encode('utf-8')
-        else:
-            body_bytes = str(body_data).encode('utf-8')
-    
-    print(f"DEBUG: body_bytes length: {len(body_bytes)}")
-    
-    # Build HTTP response with proper CRLF line endings
-    response_lines = [
-        f"HTTP/1.1 {status_code} {status_message}",
-        f"Content-Type: {content_type}",
-        f"Content-Length: {len(body_bytes)}", 
-        "Connection: close",
-        ""  # Empty line separating headers from body
-    ]
-    
-    # Join with \r\n (CRLF) for proper HTTP formatting
-    response_header = "\r\n".join(response_lines).encode('utf-8')
-    result = response_header + body_bytes
-    
-    print(f"DEBUG: Final response length: {len(result)} bytes")
-    print(f"DEBUG: Response headers: {response_header}")
-    return result
-    return result
+    try:
+        print(f"DEBUG format_http_response: status={status_code}, content_type={content_type}, body_data={body_data}")
+        
+        status_message = HTTP_STATUS_CODES.get(status_code, "Unknown Status")
+        
+        # Only serialize body_data if it's not None and status_code is not 204 (No Content)
+        body_bytes = b""
+        if body_data is not None and status_code != 204:
+            if isinstance(body_data, dict):
+                body_bytes = json.dumps(body_data).encode('utf-8')
+                print(f"DEBUG: Serialized JSON to {len(body_bytes)} bytes: {body_bytes}")
+            else:
+                body_bytes = str(body_data).encode('utf-8')
+                print(f"DEBUG: Converted string to {len(body_bytes)} bytes: {body_bytes}")
+        
+        print(f"DEBUG: body_bytes length: {len(body_bytes)}")
+        
+        # Build HTTP response with proper CRLF line endings
+        headers = [
+            f"HTTP/1.1 {status_code} {status_message}",
+            f"Content-Type: {content_type}",
+            f"Content-Length: {len(body_bytes)}", 
+            "Connection: close"
+        ]
+        
+        # Properly format HTTP response: headers + \r\n\r\n + body
+        response_header = "\r\n".join(headers) + "\r\n\r\n"
+        result = response_header.encode('utf-8') + body_bytes
+        
+        print(f"DEBUG: Final response length: {len(result)} bytes")
+        print(f"DEBUG: Response headers: {response_header}")
+        print(f"DEBUG: Complete response: {result}")
+        return result
+        
+    except Exception as e:
+        print(f"ERROR in format_http_response: {e}")
+        import traceback
+        traceback.print_exc()
+        # Return a simple error response
+        error_response = b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        return error_response
 
 # --- Client Handler (runs in a separate thread for each client) ---
 def handle_client(client_socket, addr):
@@ -250,7 +260,15 @@ def handle_client(client_socket, addr):
         client_socket.settimeout(10) # Short timeout for initial request read
         
         print(f"[{threading.current_thread().name}] DEBUG: Waiting to receive data from {addr}")
-        raw_request_data = client_socket.recv(4096) 
+        try:
+            raw_request_data = client_socket.recv(4096) 
+            print(f"[{threading.current_thread().name}] DEBUG: recv() returned {len(raw_request_data) if raw_request_data else 0} bytes")
+        except socket.timeout:
+            print(f"[{threading.current_thread().name}] ERROR: Socket timeout while reading request from {addr}")
+            return
+        except Exception as e:
+            print(f"[{threading.current_thread().name}] ERROR: Exception while reading from socket: {e}")
+            return 
         
         if not raw_request_data:
             print(f"[{threading.current_thread().name}] DEBUG: No data from {addr}, closing.")
@@ -267,7 +285,8 @@ def handle_client(client_socket, addr):
             # body = request_info['body'] # Not used for this logic, but available
 
             # --- Middleware Logic ---
-            allowed_paths = ['/health', '/fall', '/revive', '/groups', '/users'] # Base allowed paths
+            print(f"[{threading.current_thread().name}] DEBUG: Checking middleware - isAlive={get_is_alive()}, isActive={get_is_active()}")
+            allowed_paths = ['/health', '/fall', '/revive', '/groups', '/users', '/'] # Base allowed paths
             # Also allow /subscribe/status, /subscribe/user, /notify/, and /user/ with optional query parameters
             subscribe_patterns = ['/subscribe/status', '/subscribe/user', '/notify/', '/user/']
             
@@ -306,16 +325,21 @@ def handle_client(client_socket, addr):
                     client_socket.sendall(FIXED_RESPONSE)
                 elif path == '/health':
                     print(f"[{threading.current_thread().name}] DEBUG: Processing /health request")
-                    is_alive_val = get_is_alive()
-                    is_active_val = get_is_active()
-                    print(f"[{threading.current_thread().name}] DEBUG: State - alive={is_alive_val}, active={is_active_val}")
-                    response_data = {'status': 'alive' if is_alive_val else 'down', 'active': is_active_val}
-                    status_code = 200 if is_alive_val else 503
-                    print(f"[{threading.current_thread().name}] DEBUG: Response prepared - status={status_code}, data={response_data}")
-                    response_bytes = format_http_response(status_code, 'application/json', response_data)
-                    print(f"[{threading.current_thread().name}] DEBUG: Sending response, length={len(response_bytes)}")
-                    client_socket.sendall(response_bytes)
-                    print(f"[{threading.current_thread().name}] DEBUG: /health response sent successfully")
+                    try:
+                        is_alive_val = get_is_alive()
+                        is_active_val = get_is_active()
+                        print(f"[{threading.current_thread().name}] DEBUG: State - alive={is_alive_val}, active={is_active_val}")
+                        response_data = {'status': 'alive' if is_alive_val else 'down', 'active': is_active_val}
+                        status_code = 200 if is_alive_val else 503
+                        print(f"[{threading.current_thread().name}] DEBUG: Response prepared - status={status_code}, data={response_data}")
+                        response_bytes = format_http_response(status_code, 'application/json', response_data)
+                        print(f"[{threading.current_thread().name}] DEBUG: Sending response, length={len(response_bytes)}")
+                        client_socket.sendall(response_bytes)
+                        print(f"[{threading.current_thread().name}] DEBUG: /health response sent successfully")
+                    except Exception as e:
+                        print(f"[{threading.current_thread().name}] ERROR in /health handler: {e}")
+                        import traceback
+                        traceback.print_exc()
                 elif path == "/home":
                     html = "<html> <body>Chat</body> </html>"
                     status_code = 200 
@@ -752,7 +776,7 @@ def start_server_manual_http():
     Starts the HTTP server using raw sockets and a while True loop.
     Each incoming connection is handled in a new thread.
     """
-    port = int(os.getenv('PORT', 8080))
+    port = int(os.getenv('PORT', 8083))
     host = '0.0.0.0' # Listen on all interfaces
 
     print(f"DEBUG: Starting server initialization...")
