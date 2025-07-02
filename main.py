@@ -3,6 +3,7 @@ import threading
 import requests
 import socket # For raw socket programming
 import json   # For handling JSON responses 
+from database.database import SessionLocal, User, Grupo, Message, add_message
  
 # --- Global State Variables ---
 # These variables hold the system's operational status.
@@ -287,6 +288,126 @@ def handle_client(client_socket, addr):
             # --- Route Handling ---
             response_data = {}
             status_code = 200
+
+            # ...existing code...
+
+            if method == 'POST' and path == '/login':
+                # Login: retorna o id do usuário pelo username
+                body = request_info.get('body')
+                if not body or 'username' not in body:
+                    status_code = 400
+                    response_data = {'error': 'username é obrigatório'}
+                else:
+                    with SessionLocal() as session:
+                        user = session.query(User).filter(User.username == body['username']).first()
+                        if user:
+                            response_data = {'user_id': user.id}
+                        else:
+                            status_code = 404
+                            response_data = {'error': 'Usuário não encontrado'}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+
+            elif method == 'GET' and path == '/chats':
+                # Lista os grupos do usuário
+                body = request_info.get('body')
+                if not body or 'userId' not in body:
+                    status_code = 400
+                    response_data = {'error': 'userId é obrigatório'}
+                else:
+                    with SessionLocal() as session:
+                        user = session.query(User).filter(User.id == body['userId']).first()
+                        if user:
+                            chats = [{'id': g.id, 'name': g.name} for g in user.groups]
+                            response_data = {'user_id': user.id, 'chats': chats}
+                        else:
+                            status_code = 404
+                            response_data = {'error': 'Usuário não encontrado'}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+
+            elif method == 'GET' and path == '/messages':
+                # Lista mensagens de um grupo
+                body = request_info.get('body')
+                if not body or 'groupId' not in body:
+                    status_code = 400
+                    response_data = {'error': 'groupId é obrigatório'}
+                else:
+                    with SessionLocal() as session:
+                        group = session.query(Grupo).filter(Grupo.id == body['groupId']).first()
+                        if group:
+                            messages = [
+                                {
+                                    'id': m.id,
+                                    'sender': m.sender.username,
+                                    'content': m.content,
+                                    'timestamp': m.timestamp.isoformat()
+                                }
+                                for m in group.messages
+                            ]
+                            response_data = {'group_id': group.id, 'messages': messages}
+                        else:
+                            status_code = 404
+                            response_data = {'error': 'Grupo não encontrado'}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+
+            elif method == 'POST' and path == '/messages':
+                # Envia mensagem para um grupo
+                body = request_info.get('body')
+                if not body or not all(k in body for k in ('userId', 'groupId', 'content')):
+                    status_code = 400
+                    response_data = {'error': 'userId, groupId e content são obrigatórios'}
+                else:
+                    with SessionLocal() as session:
+                        user = session.query(User).filter(User.id == body['userId']).first()
+                        group = session.query(Grupo).filter(Grupo.id == body['groupId']).first()
+                        if not user or not group:
+                            status_code = 404
+                            response_data = {'error': 'Usuário ou grupo não encontrado'}
+                        else:
+                            add_message(session, user, group, body['content'])
+                            response_data = {'message': 'Mensagem enviada'}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+
+            elif method == 'GET' and path == '/group-users':
+                # Lista usuários de um grupo
+                body = request_info.get('body')
+                if not body or 'groupId' not in body:
+                    status_code = 400
+                    response_data = {'error': 'groupId é obrigatório'}
+                else:
+                    with SessionLocal() as session:
+                        group = session.query(Grupo).filter(Grupo.id == body['groupId']).first()
+                        if group:
+                            users = [{'id': u.id, 'username': u.username} for u in group.members]
+                            response_data = {'group_id': group.id, 'users': users}
+                        else:
+                            status_code = 404
+                            response_data = {'error': 'Grupo não encontrado'}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+
+            elif method == 'DELETE' and path == '/messages':
+                # Remove mensagem por id
+                body = request_info.get('body')
+                if not body or 'messageId' not in body:
+                    status_code = 400
+                    response_data = {'error': 'messageId é obrigatório'}
+                else:
+                    with SessionLocal() as session:
+                        message = session.query(Message).filter(Message.id == body['messageId']).first()
+                        if message:
+                            session.delete(message)
+                            session.commit()
+                            response_data = {'message': 'Mensagem removida'}
+                        else:
+                            status_code = 404
+                            response_data = {'error': 'Mensagem não encontrada'}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+            # ...existing code...
 
             if method == 'GET':
                 if path == '/health':
