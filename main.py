@@ -295,7 +295,7 @@ def handle_client(client_socket, addr):
                  b"Content-Length: 12\r\n" \
                  b"Connection: close\r\n" \
                  b"\r\n" \
-                 b"Hello Render!"
+                 b"Render Sanity check!"
                     client_socket.sendall(FIXED_RESPONSE)
                 if path == '/health':
                     print(f"[{threading.current_thread().name}] DEBUG: Processing /health request")
