@@ -289,6 +289,14 @@ def handle_client(client_socket, addr):
             status_code = 200
 
             if method == 'GET':
+                if path == '/':
+                    FIXED_RESPONSE = b"HTTP/1.1 200 OK\r\n" \
+                 b"Content-Type: text/plain\r\n" \
+                 b"Content-Length: 12\r\n" \
+                 b"Connection: close\r\n" \
+                 b"\r\n" \
+                 b"Hello Render!"
+                    client_socket.sendall(FIXED_RESPONSE)
                 if path == '/health':
                     print(f"[{threading.current_thread().name}] DEBUG: Processing /health request")
                     is_alive_val = get_is_alive()
@@ -737,7 +745,7 @@ def start_server_manual_http():
     Starts the HTTP server using raw sockets and a while True loop.
     Each incoming connection is handled in a new thread.
     """
-    port = int(os.getenv('PORT', 8083))
+    port = int(os.getenv('PORT', 8080))
     host = '0.0.0.0' # Listen on all interfaces
 
     print(f"DEBUG: Starting server initialization...")
