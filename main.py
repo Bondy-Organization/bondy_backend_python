@@ -826,6 +826,50 @@ def enhanced_notify_clients_of_state_change(group_name=None):
                 with condition:
                     condition.notify_all()
 
+
+# Test function to verify HTTP response format
+def test_format_http_response():
+    """Test the HTTP response formatting function"""
+    test_data = {'status': 'alive', 'active': True}
+    response_bytes = format_http_response(200, 'application/json', test_data)
+    response_str = response_bytes.decode('utf-8')
+    print("="*50)
+    print("TEST HTTP RESPONSE:")
+    print(repr(response_str))
+    print("="*50)
+    print("READABLE FORMAT:")
+    print(response_str)
+    print("="*50)
+
+def sync_user_groups_from_database(user_id):
+    """
+    Syncs user-group memberships from database to in-memory storage.
+    Call this when a user logs in or when group memberships change.
+    """
+    try:
+        with SessionLocal() as session:
+            user = session.query(User).filter(User.id == user_id).first()
+            if user:
+                group_names = [group.name for group in user.groups]
+                set_user_groups(user_id, group_names)
+                print(f"DEBUG: Synced user {user_id} groups: {group_names}")
+                return group_names
+            else:
+                print(f"DEBUG: User {user_id} not found in database")
+                return []
+    except Exception as e:
+        print(f"ERROR syncing user groups for user {user_id}: {e}")
+        return []
+
+def notify_group_of_change(group_name):
+    """
+    Notifies a specific group of changes (like new messages).
+    """
+    print(f"DEBUG: Notifying group '{group_name}' of changes")
+    notify_clients_of_state_change(group_name)
+
+
+
 # --- Main Server Loop ---
 def start_server_manual_http():
     """
@@ -917,45 +961,4 @@ if __name__ == '__main__':
             sync_manager.join(timeout=2)
             print("SyncManager thread stopped.")
         print("Application shut down cleanly.")
-
-# Test function to verify HTTP response format
-def test_format_http_response():
-    """Test the HTTP response formatting function"""
-    test_data = {'status': 'alive', 'active': True}
-    response_bytes = format_http_response(200, 'application/json', test_data)
-    response_str = response_bytes.decode('utf-8')
-    print("="*50)
-    print("TEST HTTP RESPONSE:")
-    print(repr(response_str))
-    print("="*50)
-    print("READABLE FORMAT:")
-    print(response_str)
-    print("="*50)
-
-def sync_user_groups_from_database(user_id):
-    """
-    Syncs user-group memberships from database to in-memory storage.
-    Call this when a user logs in or when group memberships change.
-    """
-    try:
-        with SessionLocal() as session:
-            user = session.query(User).filter(User.id == user_id).first()
-            if user:
-                group_names = [group.name for group in user.groups]
-                set_user_groups(user_id, group_names)
-                print(f"DEBUG: Synced user {user_id} groups: {group_names}")
-                return group_names
-            else:
-                print(f"DEBUG: User {user_id} not found in database")
-                return []
-    except Exception as e:
-        print(f"ERROR syncing user groups for user {user_id}: {e}")
-        return []
-
-def notify_group_of_change(group_name):
-    """
-    Notifies a specific group of changes (like new messages).
-    """
-    print(f"DEBUG: Notifying group '{group_name}' of changes")
-    notify_clients_of_state_change(group_name)
 
