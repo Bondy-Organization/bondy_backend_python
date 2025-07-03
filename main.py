@@ -294,7 +294,7 @@ def handle_client(client_socket, addr):
             # --- Middleware Logic ---
             # Extract base path without query parameters for middleware check
             base_path = path.split('?')[0]
-            allowed_paths = ['/health', '/fall', '/revive', '/groups', '/users', '/login', '/chats', '/messages', '/group-users'] # Base allowed paths
+            allowed_paths = ['/health', '/fall', '/revive', '/groups', '/users', '/login', '/chats', '/messages', '/group-users', '/create-chat'] # Base allowed paths
             # Also allow /subscribe/status, /subscribe/user, /notify/, and /user/ with optional query parameters
             subscribe_patterns = ['/subscribe/status', '/subscribe/user', '/notify/', '/user/']
             
@@ -450,6 +450,92 @@ def handle_client(client_socket, addr):
                         else:
                             status_code = 404
                             response_data = {'error': 'Grupo não encontrado'}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+
+            elif method == 'DELETE' and path == '/messages':
+                # Remove mensagem por id
+                body = request_info.get('body')
+                if not body or 'messageId' not in body:
+                    status_code = 400
+                    response_data = {'error': 'messageId é obrigatório'}
+                else:
+                    with SessionLocal() as session:
+                        message = session.query(Message).filter(Message.id == body['messageId']).first()
+                        if message:
+                            session.delete(message)
+                            session.commit()
+                            response_data = {'message': 'Mensagem removida'}
+                        else:
+                            status_code = 404
+                            response_data = {'error': 'Mensagem não encontrada'}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+
+            elif method == 'POST' and path == '/create-chat':
+                # Create a new chat group
+                body = request_info.get('body')
+                if not body or not all(k in body for k in ('groupName', 'creatorId')):
+                    status_code = 400
+                    response_data = {'error': 'groupName and creatorId are required'}
+                else:
+                    with SessionLocal() as session:
+                        # Check if creator user exists
+                        creator = session.query(User).filter(User.id == body['creatorId']).first()
+                        if not creator:
+                            status_code = 404
+                            response_data = {'error': 'Creator user not found'}
+                        else:
+                            # Check if group name already exists
+                            existing_group = session.query(Grupo).filter(Grupo.name == body['groupName']).first()
+                            if existing_group:
+                                status_code = 409
+                                response_data = {'error': 'Group name already exists'}
+                            else:
+                                # Create new group
+                                new_group = Grupo(name=body['groupName'])
+                                session.add(new_group)
+                                session.flush()  # To get the ID before commit
+                                
+                                # Add creator as member
+                                new_group.members.append(creator)
+                                added_members = [{'id': creator.id, 'username': creator.username}]
+                                
+                                # Process additional members if provided
+                                members_list = body.get('members', [])
+                                not_found_members = []
+                                
+                                if members_list:
+                                    for username in members_list:
+                                        if username != creator.username:  # Skip creator (already added)
+                                            member_user = session.query(User).filter(User.username == username).first()
+                                            if member_user:
+                                                # Check if member is not already in the group
+                                                if member_user not in new_group.members:
+                                                    new_group.members.append(member_user)
+                                                    added_members.append({'id': member_user.id, 'username': member_user.username})
+                                            else:
+                                                not_found_members.append(username)
+                                
+                                session.commit()
+                                session.refresh(new_group)
+                                
+                                # Sync user groups for all members
+                                for member in new_group.members:
+                                    sync_user_groups_from_database(member.id)
+                                
+                                response_data = {
+                                    'group_id': new_group.id,
+                                    'group_name': new_group.name,
+                                    'creator_id': creator.id,
+                                    'members': added_members
+                                }
+                                
+                                # Include warning about not found members if any
+                                if not_found_members:
+                                    response_data['warning'] = f'Users not found: {", ".join(not_found_members)}'
+                                
+                                print(f"DEBUG: Created new group '{new_group.name}' (ID: {new_group.id}) with creator {creator.username} and {len(added_members)-1} additional members")
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
 

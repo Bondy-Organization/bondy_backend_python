@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Creation Example</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .user-info {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Chat Backend - Create Chat Example</h1>
+    
+    <div class="container">
+        <h2>Step 1: Login/Create User</h2>
+        <div class="form-group">
+            <label for="username">Username:</label>
+            <input type="text" id="username" placeholder="Enter your username">
+        </div>
+        <button onclick="loginUser()">Login/Create User</button>
+        <div id="loginResult"></div>
+        <div id="userInfo" class="user-info" style="display: none;"></div>
+    </div>
+
+    <div class="container">
+        <h2>Step 2: Create Chat Group</h2>
+        <div class="form-group">
+            <label for="groupName">Group Name:</label>
+            <input type="text" id="groupName" placeholder="Enter group name" disabled>
+        </div>
+        <button id="createChatBtn" onclick="createChat()" disabled>Create Chat Group</button>
+        <div id="createChatResult"></div>
+    </div>
+
+    <div class="container">
+        <h2>Step 3: View Your Chats</h2>
+        <button id="viewChatsBtn" onclick="viewChats()" disabled>View My Chats</button>
+        <div id="chatsResult"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://127.0.0.1:8080';
+        let currentUserId = null;
+
+        async function loginUser() {
+            const username = document.getElementById('username').value.trim();
+            if (!username) {
+                showResult('loginResult', 'Please enter a username', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    currentUserId = data.user_id;
+                    showResult('loginResult', `Success!\n${JSON.stringify(data, null, 2)}`, 'success');
+                    
+                    // Show user info
+                    const userInfo = document.getElementById('userInfo');
+                    userInfo.innerHTML = `<strong>Logged in as:</strong> ${username} (ID: ${currentUserId})`;
+                    userInfo.style.display = 'block';
+                    
+                    // Enable next steps
+                    document.getElementById('groupName').disabled = false;
+                    document.getElementById('createChatBtn').disabled = false;
+                    document.getElementById('viewChatsBtn').disabled = false;
+                } else {
+                    showResult('loginResult', `Error: ${data.error || 'Login failed'}`, 'error');
+                }
+            } catch (error) {
+                showResult('loginResult', `Network error: ${error.message}`, 'error');
+            }
+        }
+
+        async function createChat() {
+            const groupName = document.getElementById('groupName').value.trim();
+            if (!groupName) {
+                showResult('createChatResult', 'Please enter a group name', 'error');
+                return;
+            }
+
+            if (!currentUserId) {
+                showResult('createChatResult', 'Please login first', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/create-chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        groupName: groupName,
+                        creatorId: currentUserId
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showResult('createChatResult', `Chat group created successfully!\n${JSON.stringify(data, null, 2)}`, 'success');
+                    // Clear the input
+                    document.getElementById('groupName').value = '';
+                } else {
+                    showResult('createChatResult', `Error: ${data.error || 'Failed to create chat'}`, 'error');
+                }
+            } catch (error) {
+                showResult('createChatResult', `Network error: ${error.message}`, 'error');
+            }
+        }
+
+        async function viewChats() {
+            if (!currentUserId) {
+                showResult('chatsResult', 'Please login first', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/chats?userId=${currentUserId}`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showResult('chatsResult', `Your chats:\n${JSON.stringify(data, null, 2)}`, 'success');
+                } else {
+                    showResult('chatsResult', `Error: ${data.error || 'Failed to fetch chats'}`, 'error');
+                }
+            } catch (error) {
+                showResult('chatsResult', `Network error: ${error.message}`, 'error');
+            }
+        }
+
+        function showResult(elementId, message, type) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = `result ${type}`;
+        }
+
+        // Test server connection on page load
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch(`${API_BASE}/chats?userId=1`);
+                console.log('Server connection test:', response.status);
+            } catch (error) {
+                showResult('loginResult', 
+                    'Warning: Cannot connect to server. Make sure the server is running on port 8080.', 
+                    'error');
+            }
+        });
+    </script>
+</body>
+</html>
