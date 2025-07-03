@@ -452,6 +452,19 @@ def handle_client(client_socket, addr):
                             response_data = {'error': 'Grupo não encontrado'}
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
+            
+            elif method == 'GET' and path == '/users':
+                # Busca usuários por filtro de nome (parcial ou exato)
+                body = request_info.get('body')
+                filtro_nome = body.get('username') if body else None
+                with SessionLocal() as session:
+                    query = session.query(User)
+                    if filtro_nome:
+                        query = query.filter(User.username.ilike(f"%{filtro_nome}%"))
+                    users = [{'id': u.id, 'username': u.username} for u in query.all()]
+                    response_data = {'users': users}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
 
             elif method == 'DELETE' and path == '/messages':
                 # Remove mensagem por id
