@@ -1,254 +1,204 @@
-Projeto de Chat Distribuído
-1. Visão Geral
+
+# Projeto de Chat Distribuído
+
+## 1. Visão Geral
+
 Este projeto foi desenvolvido para a disciplina de Sistemas Distribuídos e implementa um servidor de chat de alta disponibilidade, utilizando uma arquitetura ativa/passiva para garantir a continuidade do serviço.
 
-O núcleo do sistema é um servidor HTTP multi-threaded construído com a biblioteca socket do Python, demonstrando o funcionamento de baixo nível do protocolo. O servidor gerencia o estado da aplicação (alive/active), sincroniza-se com um nó par para definir seu papel operacional (ativo ou passivo) e utiliza a técnica de long-polling para atualizações em tempo real com os clientes. A interação com o banco de dados PostgreSQL é gerenciada através do ORM SQLAlchemy.
+O núcleo do sistema é um servidor HTTP multi-threaded construído com a biblioteca `socket` do Python, demonstrando o funcionamento de baixo nível do protocolo. O servidor:
 
-2. Funcionalidades
-Alta Disponibilidade: Opera em um cluster ativo/passivo. Um SyncManager no nó passivo monitora continuamente a saúde do nó ativo e está pronto para assumir em caso de falha.
+- Gerencia o estado da aplicação (`alive`/`active`);
+- Sincroniza-se com um nó par para definir seu papel operacional (ativo ou passivo);
+- Utiliza a técnica de **long-polling** para atualizações em tempo real com os clientes.
 
-Atualizações em Tempo Real: Implementa um mecanismo de long-polling (/subscribe/status) que permite aos clientes receberem notificações imediatas sobre mudanças de estado do servidor sem a necessidade de polling constante.
+A interação com o banco de dados PostgreSQL é gerenciada através do ORM **SQLAlchemy**.
 
-Notificações por Grupo: Suporta o envio de notificações direcionadas para grupos específicos de clientes, otimizando a comunicação.
+## 2. Funcionalidades
 
-Integração com Banco de Dados: Utiliza o SQLAlchemy ORM para mapear objetos Python para um banco de dados PostgreSQL, gerenciando usuários, grupos e mensagens.
+- **Alta Disponibilidade**: Cluster ativo/passivo com `SyncManager` monitorando e assumindo o controle em caso de falha.
+- **Atualizações em Tempo Real**: Long-polling no endpoint `/subscribe/status`.
+- **Notificações por Grupo**: Suporte à comunicação direcionada.
+- **Integração com Banco de Dados**: ORM SQLAlchemy com PostgreSQL.
+- **Servidor HTTP Customizado**: Baseado em `socket`, para maior controle do protocolo.
+- **Arquitetura Multi-threaded**: Cada cliente é tratado em uma thread separada.
+- **API de Controle RESTful**: Endpoints como `/health`, `/fall`, `/revive` para gerenciamento.
 
-Servidor HTTP Customizado: Construído do zero usando a biblioteca socket para uma compreensão profunda do parse de requisições e formatação de respostas HTTP.
+## 3. Arquitetura
 
-Arquitetura Multi-threaded: Cada conexão de cliente é tratada em uma thread separada, permitindo que o servidor gerencie múltiplas requisições concorrentes.
+O sistema roda em duas instâncias idênticas:
 
-API de Controle RESTful: Fornece endpoints simples (/health, /fall, /revive) para monitorar e controlar o estado do servidor para fins de teste e gerenciamento.
+- **Nó Ativo**: Lida com os clientes (`IS_ACTIVE=true`)
+- **Nó Passivo**: Standby, com `SyncManager` monitorando (`IS_ACTIVE=false`)
 
-3. Arquitetura
-O sistema foi projetado para rodar em duas instâncias idênticas: uma ativa e uma passiva.
+### Lógica de Failover
 
-Nó Ativo: Lida com todo o tráfego dos clientes. Sua variável de ambiente IS_ACTIVE é definida como true.
+1. O `SyncManager` do nó passivo verifica a saúde do ativo via `/health`.
+2. Se o ativo falhar, o passivo assume o controle.
+3. O estado é gerenciado por flags globais: `_is_alive` e `_is_active`.
 
-Nó Passivo: Permanece em standby. Sua variável de ambiente IS_ACTIVE é false. Ele executa uma thread SyncManager que envia requisições de verificação de saúde para o endpoint /health do nó ativo.
+### Long-Polling
 
-Lógica de Failover:
+O servidor mantém a conexão do cliente aberta no endpoint `/subscribe/status`, liberando-a apenas com mudanças de estado ou timeout, utilizando `threading.Condition`.
 
-O SyncManager no nó passivo verifica o nó ativo.
+## 4. Estrutura do Projeto
 
-Se o nó ativo não responder ou relatar um status inativo, o SyncManager no nó passivo assume que o nó ativo está fora do ar.
-
-Neste momento, o nó passivo se torna o novo nó ativo para manter o serviço operacional.
-
-Gerenciamento de Estado: O estado operacional do servidor é controlado por duas flags globais, _is_alive e _is_active, que são acessadas de forma segura entre as threads.
-
-Long-Polling: Clientes se conectam ao endpoint /subscribe/status. O servidor mantém essa conexão aberta até que uma mudança de estado ocorra ou um timeout seja atingido, usando uma threading.Condition para esperar eficientemente por mudanças.
-
-4. Estrutura do Projeto
+```
 .
-├── main.py             # Aplicação principal: Servidor HTTP, gestão de estado e lógica da API.
+├── main.py             # Aplicação principal
 ├── database/
-│   └── database.py     # Configuração do banco, modelos SQLAlchemy e funções de acesso a dados.
-└── .env                # Variáveis de ambiente para configuração (conexão com BD, etc.).
+│   └── database.py     # Modelos e configuração do banco
+└── .env                # Variáveis de ambiente
+```
 
-5. Endpoints da API
-Método
+## 5. Endpoints da API
 
-Rota
+| Método | Rota                   | Descrição                                                                 |
+|--------|------------------------|---------------------------------------------------------------------------|
+| GET    | `/`                    | Verificação básica                                                        |
+| GET    | `/health`              | Verifica se o servidor está vivo e ativo                                 |
+| POST   | `/fall`                | Define o servidor como inativo (`is_alive = False`)                      |
+| POST   | `/revive`              | Define o servidor como vivo (`is_alive = True`)                          |
+| GET    | `/subscribe/status`    | Long-polling para mudanças de status                                     |
+| POST   | `/notify/{group}`      | Notificação para grupo específico                                        |
+| POST   | `/login`               | Login ou criação de usuário (`{'username': 'user'}`)                     |
+| GET    | `/chats`               | Lista os grupos de um usuário (`{'userId': 1}`)                          |
+| GET    | `/messages`            | Lista mensagens de um grupo (`{'groupId': 1}`)                           |
+| POST   | `/messages`            | Envia mensagem para grupo (`{'userId': 1, 'groupId': 1, 'content': ''}`) |
+| DELETE | `/messages`            | Deleta mensagem (`{'messageId': 1}`)                                     |
+| GET    | `/group-users`         | Lista usuários de um grupo (`{'groupId': 1}`)                            |
 
-Descrição
+## 6. Instruções de Instalação e Execução
 
-GET
+### Pré-requisitos
 
-/
+- Python 3.7+
+- PostgreSQL 14+
+- Git
 
-Rota raiz para uma verificação básica de funcionamento.
+### Passos
 
-GET
+#### 1. Clone o Repositório
 
-/health
-
-Verifica a saúde do servidor. Retorna {'status': 'alive', 'active': true}.
-
-POST
-
-/fall
-
-Define manualmente o estado do servidor para down (is_alive = False).
-
-POST
-
-/revive
-
-Define manualmente o estado do servidor para alive (is_alive = True).
-
-GET
-
-/subscribe/status
-
-Endpoint de long-polling para atualizações de status em tempo real.
-
-POST
-
-/notify/{group}
-
-Dispara uma notificação para um grupo de clientes específico.
-
-POST
-
-/login
-
-Faz login de um usuário ou cria um novo. Corpo: {'username': 'user'}.
-
-GET
-
-/chats
-
-Lista os grupos aos quais um usuário pertence. Corpo: {'userId': 1}.
-
-GET
-
-/messages
-
-Lista as mensagens de um grupo. Corpo: {'groupId': 1}.
-
-POST
-
-/messages
-
-Envia uma mensagem para um grupo. Corpo: {'userId': 1, 'groupId': 1, 'content': 'Olá'}.
-
-DELETE
-
-/messages
-
-Deleta uma mensagem pelo ID. Corpo: {'messageId': 1}.
-
-GET
-
-/group-users
-
-Lista todos os usuários de um grupo. Corpo: {'groupId': 1}.
-
-6. Instruções de Instalação e Execução
-Pré-requisitos
-Python (versão 3.7 ou superior)
-
-PostgreSQL (versão 14 ou superior)
-
-Git
-
-Passos de Instalação
-Clone o Repositório
-
+```bash
 git clone <URL_DO_SEU_REPOSITORIO>
 cd <nome_da_pasta_do_projeto>
+```
 
-Crie e Ative um Ambiente Virtual
-Isso isola as dependências do seu projeto. Lembre-se de ativar o ambiente sempre que for trabalhar no projeto.
+#### 2. Crie e Ative um Ambiente Virtual
 
-# 1. Criar o ambiente virtual (só precisa fazer uma vez)
+```bash
+# Criar o ambiente
 python -m venv venv
 
-# 2. Ativar o ambiente (faça isso toda vez que abrir o projeto)
-# No Windows (PowerShell):
+# Ativar o ambiente
+# Windows:
 .\venv\Scripts\activate
 
-# No macOS/Linux:
+# macOS/Linux:
 source venv/bin/activate
+```
 
-Instale as Dependências
-Com o ambiente virtual ativo, instale as bibliotecas necessárias.
+#### 3. Instale as Dependências
 
+```bash
 pip install requests python-dotenv SQLAlchemy psycopg2-binary
+```
 
-(Você também pode criar um arquivo requirements.txt com essas dependências)
+(Opcional: use `requirements.txt` para automatizar)
 
-Prepare o Banco de Dados no PostgreSQL
-O script criará as tabelas, mas o banco de dados precisa ser criado manualmente.
+#### 4. Configure o Banco de Dados
 
-Abra o pgAdmin 4.
+1. Crie o banco no **pgAdmin** com o nome `chat_distribuido_db`.
+2. No projeto, crie um arquivo `.env`:
 
-Conecte-se ao seu servidor de banco de dados.
-
-Na árvore à esquerda, clique com o botão direito em Databases e selecione Create -> Database....
-
-No campo "Database name", digite o nome que será usado no seu arquivo .env (ex: chat_distribuido_db).
-
-Clique em Save.
-
-Configure as Variáveis de Ambiente
-Crie um arquivo chamado .env na raiz do projeto e adicione suas credenciais do PostgreSQL.
-
-# .env file
+```env
 DB_USER=seu_usuario_postgres
 DB_PASSWORD=sua_senha_postgres
 DB_HOST=localhost
 DB_PORT=5432
-DB_NAME=chat_distribuido_db # O mesmo nome criado no passo 4
+DB_NAME=chat_distribuido_db
 
-# Configuração do Servidor
 PORT=8080
 IS_ACTIVE=true
 PEER_URL=http://localhost:8081
+```
 
-Crie as Tabelas no Banco
-Este comando executa o script que criará o esquema de tabelas dentro do banco de dados.
+#### 5. Crie as Tabelas
 
+```bash
 python database/database.py
+```
 
-Execute a Aplicação Principal
+#### 6. Execute a Aplicação
 
+```bash
 python main.py
+```
 
-O servidor estará rodando na porta definida na sua variável de ambiente (ex: http://localhost:8080).
+## 7. Executando em Modo de Alta Disponibilidade
 
-7. Executando em Modo de Alta Disponibilidade
-Para testar a arquitetura ativa/passiva, você precisará de duas instâncias rodando.
+### Instância 1 (Ativa)
 
-Instância 1 (Nó Ativo)
-Configure seu arquivo .env:
-
+```env
 PORT=8080
 IS_ACTIVE=true
-PEER_URL=http://localhost:8081 # URL do nó passivo
+PEER_URL=http://localhost:8081
+```
 
-Inicie o servidor em um terminal:
-
+```bash
 python main.py
+```
 
-Instância 2 (Nó Passivo)
-Abra um novo terminal.
+### Instância 2 (Passiva)
 
-Configure as variáveis de ambiente para esta instância (pode ser via export ou um segundo arquivo .env carregado manualmente):
+#### Linux/macOS:
 
-# Exemplo para Linux/macOS
+```bash
 export PORT=8081
 export IS_ACTIVE=false
-export PEER_URL=http://localhost:8080 # URL do nó ativo
-
-No Windows, use set em vez de export.
-
-Inicie o segundo servidor neste novo terminal:
-
+export PEER_URL=http://localhost:8080
 python main.py
+```
 
-8. Como Testar (com cURL)
-Verificar a Saúde:
+#### Windows (PowerShell):
 
+```powershell
+$env:PORT=8081
+$env:IS_ACTIVE="false"
+$env:PEER_URL="http://localhost:8080"
+python main.py
+```
+
+## 8. Como Testar (com cURL)
+
+### Verificar saúde:
+
+```bash
 curl http://localhost:8080/health
+```
 
-Inscrever-se para Mudanças de Status (Long-Polling):
-Este comando ficará aguardando até que uma mudança de status ocorra ou o timeout de 25 segundos seja atingido.
+### Long-polling (aguarda alteração de status):
 
+```bash
 curl http://localhost:8080/subscribe/status
+```
 
-Simular uma Falha:
-Em outro terminal, envie uma requisição para o endpoint /fall. Você verá o comando curl acima receber uma atualização imediatamente.
+### Simular falha:
 
+```bash
 curl -X POST http://localhost:8080/fall
+```
 
-Enviar uma Mensagem:
+### Enviar mensagem:
 
-curl -X POST -H "Content-Type: application/json" -d '{"userId": 1, "groupId": 1, "content": "Olá do cURL!"}' http://localhost:8080/messages
+```bash
+curl -X POST -H "Content-Type: application/json" \
+-d '{"userId": 1, "groupId": 1, "content": "Olá do cURL!"}' \
+http://localhost:8080/messages
+```
 
-9. Autores
-Seu Nome Completo
+## 9. Autores
 
-Nome do Colega 1
-
-Nome do Colega 2
+- Emanuel Silva
+- Emily Salum  
+- Gabriel Marques  
