@@ -30,27 +30,19 @@ def test_full_chat_flow():
     print(f"Bob login: {response2.status_code} - {response2.json()}")
     bob_id = response2.json()['user_id']
     
-    # Step 2: Create a chat group
-    print("\n2. Creating chat group...")
+    # Step 2: Create a chat group with multiple members
+    print("\n2. Creating chat group with multiple members...")
     create_chat_data = {
         "groupName": "Alice and Friends",
-        "creatorId": alice_id
+        "creatorId": alice_id,
+        "members": ["bob"]  # Add Bob directly when creating the group
     }
     response = requests.post(f"{BASE_URL}/create-chat", json=create_chat_data)
     print(f"Create chat response: {response.status_code} - {response.json()}")
     group_id = response.json()['group_id']
     
-    # Step 3: Add Bob to the group (using the existing endpoint)
-    print("\n3. Adding Bob to the group...")
-    add_user_data = {
-        "groupId": group_id,
-        "userId": bob_id
-    }
-    response = requests.post(f"{BASE_URL}/add-user-to-group", json=add_user_data)
-    print(f"Add user response: {response.status_code} - {response.json()}")
-    
-    # Step 4: Verify both users see the group in their chats
-    print("\n4. Verifying group appears in both users' chats...")
+    # Step 3: Verify both users see the group in their chats (Bob should already be in the group)
+    print("\n3. Verifying group appears in both users' chats...")
     
     response = requests.get(f"{BASE_URL}/chats?userId={alice_id}")
     alice_chats = response.json()
@@ -60,8 +52,8 @@ def test_full_chat_flow():
     bob_chats = response.json()
     print(f"Bob's chats: {bob_chats}")
     
-    # Step 5: Send a message to the group
-    print("\n5. Sending message to the group...")
+    # Step 4: Send a message to the group
+    print("\n4. Sending message to the group...")
     message_data = {
         "text": "Hello everyone! This is Alice.",
         "user_id": alice_id,
@@ -70,21 +62,21 @@ def test_full_chat_flow():
     response = requests.post(f"{BASE_URL}/send", json=message_data)
     print(f"Send message response: {response.status_code} - {response.json()}")
     
-    # Step 6: Check group messages
-    print("\n6. Retrieving group messages...")
+    # Step 5: Check group messages
+    print("\n5. Retrieving group messages...")
     response = requests.get(f"{BASE_URL}/messages?chatId={group_id}")
     messages = response.json()
     print(f"Group messages: {messages}")
     
-    # Step 7: Test group users endpoint
-    print("\n7. Checking group members...")
+    # Step 6: Test group users endpoint
+    print("\n6. Checking group members...")
     response = requests.get(f"{BASE_URL}/group-users?groupId={group_id}")
     group_users = response.json()
     print(f"Group members: {group_users}")
     
     print(f"\n✅ Full chat flow test completed successfully!")
     print(f"   - Created group '{create_chat_data['groupName']}' (ID: {group_id})")
-    print(f"   - Added users Alice (ID: {alice_id}) and Bob (ID: {bob_id})")
+    print(f"   - Added users Alice (ID: {alice_id}) and Bob (ID: {bob_id}) during creation")
     print(f"   - Sent and retrieved messages")
     
     return {

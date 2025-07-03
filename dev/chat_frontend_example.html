@@ -103,6 +103,11 @@
             <label for="groupName">Group Name:</label>
             <input type="text" id="groupName" placeholder="Enter group name" disabled>
         </div>
+        <div class="form-group">
+            <label for="members">Members (optional):</label>
+            <input type="text" id="members" placeholder="Enter usernames separated by commas (e.g., user1, user2)" disabled>
+            <small style="color: #666; font-size: 12px;">Leave empty to create group with only yourself</small>
+        </div>
         <button id="createChatBtn" onclick="createChat()" disabled>Create Chat Group</button>
         <div id="createChatResult"></div>
     </div>
@@ -146,6 +151,7 @@
                     
                     // Enable next steps
                     document.getElementById('groupName').disabled = false;
+                    document.getElementById('members').disabled = false;
                     document.getElementById('createChatBtn').disabled = false;
                     document.getElementById('viewChatsBtn').disabled = false;
                 } else {
@@ -168,24 +174,40 @@
                 return;
             }
 
+            // Process members input
+            const membersInput = document.getElementById('members').value.trim();
+            const members = membersInput ? membersInput.split(',').map(m => m.trim()).filter(m => m.length > 0) : [];
+
+            const requestBody = {
+                groupName: groupName,
+                creatorId: currentUserId
+            };
+
+            // Add members array if not empty
+            if (members.length > 0) {
+                requestBody.members = members;
+            }
+
             try {
                 const response = await fetch(`${API_BASE}/create-chat`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        groupName: groupName,
-                        creatorId: currentUserId
-                    })
+                    body: JSON.stringify(requestBody)
                 });
 
                 const data = await response.json();
                 
                 if (response.ok) {
-                    showResult('createChatResult', `Chat group created successfully!\n${JSON.stringify(data, null, 2)}`, 'success');
-                    // Clear the input
+                    let resultMessage = `Chat group created successfully!\n${JSON.stringify(data, null, 2)}`;
+                    if (data.warning) {
+                        resultMessage += `\n\nWarning: ${data.warning}`;
+                    }
+                    showResult('createChatResult', resultMessage, 'success');
+                    // Clear the inputs
                     document.getElementById('groupName').value = '';
+                    document.getElementById('members').value = '';
                 } else {
                     showResult('createChatResult', `Error: ${data.error || 'Failed to create chat'}`, 'error');
                 }

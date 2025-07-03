@@ -56,7 +56,8 @@ Create a new chat group.
 ```json
 {
     "groupName": "string (required)",
-    "creatorId": "number (required)"
+    "creatorId": "number (required)",
+    "members": ["username1", "username2"] // optional array of usernames
 }
 ```
 
@@ -70,10 +71,21 @@ Create a new chat group.
         {
             "id": 123,
             "username": "john_doe"
+        },
+        {
+            "id": 124,
+            "username": "jane_smith"
         }
-    ]
+    ],
+    "warning": "Users not found: nonexistent_user" // optional, if some members weren't found
 }
 ```
+
+**Features:**
+- The creator is automatically added as the first member
+- If `members` array is provided, those users will be added to the group during creation
+- Users that don't exist will be ignored, but a warning will be included in the response
+- Creator username in the members list will be ignored (no duplicates)
 
 **Status Codes:**
 - `200 OK` - Group created successfully
@@ -273,13 +285,14 @@ const loginResponse = await fetch('http://127.0.0.1:8080/login', {
 });
 const userData = await loginResponse.json();
 
-// Create chat group
+// Create chat group with members
 const createChatResponse = await fetch('http://127.0.0.1:8080/create-chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
         groupName: 'My New Group',
-        creatorId: userData.user_id
+        creatorId: userData.user_id,
+        members: ['jane_doe', 'bob_smith'] // optional
     })
 });
 const groupData = await createChatResponse.json();
@@ -312,10 +325,10 @@ curl -X POST http://127.0.0.1:8080/login \
   -H "Content-Type: application/json" \
   -d '{"username": "john_doe"}'
 
-# Create chat group
+# Create chat group with members
 curl -X POST http://127.0.0.1:8080/create-chat \
   -H "Content-Type: application/json" \
-  -d '{"groupName": "My New Group", "creatorId": 123}'
+  -d '{"groupName": "My New Group", "creatorId": 123, "members": ["jane_doe", "bob_smith"]}'
 
 # Get user's chats
 curl "http://127.0.0.1:8080/chats?userId=123"
