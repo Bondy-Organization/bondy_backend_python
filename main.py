@@ -455,8 +455,16 @@ def handle_client(client_socket, addr):
             
             elif method == 'GET' and path == '/users':
                 # Busca usuários por filtro de nome (parcial ou exato)
-                body = request_info.get('body')
-                filtro_nome = body.get('username') if body else None
+                 
+                filtro_nome = None
+
+                if '?' in path:
+                    query_part = path.split('?', 1)[1]
+                    for param in query_part.split('&'):
+                        if param.startswith('username='):
+                            filtro_nome = param.split('=', 1)[1]
+                            break
+                
                 with SessionLocal() as session:
                     query = session.query(User)
                     if filtro_nome:
