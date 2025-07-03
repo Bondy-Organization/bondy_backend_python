@@ -5,6 +5,7 @@ import socket # For raw socket programming
 import json   # For handling JSON responses 
 from database.database import SessionLocal, User, Grupo, Message, add_message
 import time # Para um pequeno atraso
+import bcrypt
  
 # --- Global State Variables ---
 # These variables hold the system's operational status.
@@ -315,30 +316,62 @@ def handle_client(client_socket, addr):
             response_data = {}
             status_code = 200
 
-            # ...existing code...
-
             if method == 'POST' and path == '/login':
                 # Login: retorna o id do usuário pelo username
                 body = request_info.get('body')
-                if not body or 'username' not in body:
+                if not body or 'username' not in body or 'password' not in body:
                     status_code = 400
                     response_data = {'error': 'username é obrigatório'}
                 else:
                     with SessionLocal() as session:
                         user = session.query(User).filter(User.username == body['username']).first()
-                        if user:
-                            response_data = {'user_id': user.id, 
-                                             
-                                             }
+                        if user and bcrypt.checkpw(body['password'].encode('utf-8'), user.password_hash.encode('utf-8')):
+                            response_data = {'user_id': user.id}
+                            #response_data = {'user_id': user.id, mantive isso porque não entendi o porquê da vírgula
+                            #                 }
+                        else: # Errados
+                            status_code = 401 # Unauthorized
+                            response_data = {'error': 'Invalid username or password'}
+                            # Create new user if doesn't exist mantive caso dê zebra
+                            #new_user = User(username=body['username'],
+                            #password_hash='admin123'
+                            #)
+                            ##session.add(new_user)
+                            #session.commit() 
+                            #session.refresh(new_user)  # Get the generated ID
+                            #response_data = {'user_id': new_user.id, 'created': True}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+
+            elif method == 'POST' and path == '/register':
+                body = request_info.get('body')
+                if not body or 'username' not in body or 'password' not in body:
+                    status_code = 400
+                    response_data = {'error': 'username and password are required'}
+                else:
+                    with SessionLocal() as session:
+                        # Check if user already exists
+                        existing_user = session.query(User).filter(User.username == body['username']).first()
+                        if existing_user:
+                            status_code = 409 # Conflict
+                            response_data = {'error': 'Username already exists'}
                         else:
-                            # Create new user if doesn't exist
-                            new_user = User(username=body['username'],
-                            password_hash='admin123'
+                            # Hash the password
+                            password_bytes = body['password'].encode('utf-8')
+                            salt = bcrypt.gensalt()
+                            hashed_password = bcrypt.hashpw(password_bytes, salt)
+                            
+                            new_user = User(
+                                username=body['username'],
+                                password_hash=hashed_password.decode('utf-8') # Store as a string
                             )
                             session.add(new_user)
-                            session.commit() 
-                            session.refresh(new_user)  # Get the generated ID
-                            response_data = {'user_id': new_user.id, 'created': True}
+                            session.commit()
+                            session.refresh(new_user)
+                            
+                            status_code = 201 # Created
+                            response_data = {'user_id': new_user.id, 'message': 'User created successfully'}
+                            
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
 
