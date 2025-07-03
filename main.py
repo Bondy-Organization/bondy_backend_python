@@ -292,6 +292,8 @@ def handle_client(client_socket, addr):
             # body = request_info['body'] # Not used for this logic, but available
 
             # --- Middleware Logic ---
+            # Extract base path without query parameters for middleware check
+            base_path = path.split('?')[0]
             allowed_paths = ['/health', '/fall', '/revive', '/groups', '/users', '/login', '/chats', '/messages', '/group-users'] # Base allowed paths
             # Also allow /subscribe/status, /subscribe/user, /notify/, and /user/ with optional query parameters
             subscribe_patterns = ['/subscribe/status', '/subscribe/user', '/notify/', '/user/']
@@ -299,14 +301,14 @@ def handle_client(client_socket, addr):
             is_allowed_by_middleware = False
             # Check exact matches first
             for allowed_path in allowed_paths:
-                if path == allowed_path: 
+                if base_path == allowed_path: 
                     is_allowed_by_middleware = True
                     break
             
             # Check subscribe patterns (allowing query parameters)
             if not is_allowed_by_middleware:
                 for pattern in subscribe_patterns:
-                    if path.startswith(pattern):
+                    if base_path.startswith(pattern):
                         is_allowed_by_middleware = True
                         break
 
@@ -347,15 +349,22 @@ def handle_client(client_socket, addr):
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
 
-            elif method == 'GET' and path == '/chats':
-                # Lista os grupos do usuário
-                body = request_info.get('body')
-                if not body or 'userId' not in body:
+            elif method == 'GET' and path.startswith('/chats'):
+                # Lista os grupos do usuário - using query parameters
+                user_id = None
+                if '?' in path:
+                    query_part = path.split('?', 1)[1]
+                    for param in query_part.split('&'):
+                        if param.startswith('userId='):
+                            user_id = param.split('=', 1)[1]
+                            break
+                
+                if not user_id:
                     status_code = 400
-                    response_data = {'error': 'userId é obrigatório'}
+                    response_data = {'error': 'userId query parameter é obrigatório'}
                 else:
                     with SessionLocal() as session:
-                        user = session.query(User).filter(User.id == body['userId']).first()
+                        user = session.query(User).filter(User.id == user_id).first()
                         if user:
                             chats = [{'id': g.id, 'name': g.name} for g in user.groups]
                             response_data = {'user_id': user.id, 'chats': chats}
@@ -365,15 +374,22 @@ def handle_client(client_socket, addr):
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
 
-            elif method == 'GET' and path == '/messages':
-                # Lista mensagens de um grupo
-                body = request_info.get('body')
-                if not body or 'groupId' not in body:
+            elif method == 'GET' and path.startswith('/messages'):
+                # Lista mensagens de um grupo - using query parameters
+                group_id = None
+                if '?' in path:
+                    query_part = path.split('?', 1)[1]
+                    for param in query_part.split('&'):
+                        if param.startswith('groupId='):
+                            group_id = param.split('=', 1)[1]
+                            break
+                
+                if not group_id:
                     status_code = 400
-                    response_data = {'error': 'groupId é obrigatório'}
+                    response_data = {'error': 'groupId query parameter é obrigatório'}
                 else:
                     with SessionLocal() as session:
-                        group = session.query(Grupo).filter(Grupo.id == body['groupId']).first()
+                        group = session.query(Grupo).filter(Grupo.id == group_id).first()
                         if group:
                             messages = [
                                 {
@@ -412,15 +428,22 @@ def handle_client(client_socket, addr):
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
 
-            elif method == 'GET' and path == '/group-users':
-                # Lista usuários de um grupo
-                body = request_info.get('body')
-                if not body or 'groupId' not in body:
+            elif method == 'GET' and path.startswith('/group-users'):
+                # Lista usuários de um grupo - using query parameters
+                group_id = None
+                if '?' in path:
+                    query_part = path.split('?', 1)[1]
+                    for param in query_part.split('&'):
+                        if param.startswith('groupId='):
+                            group_id = param.split('=', 1)[1]
+                            break
+                
+                if not group_id:
                     status_code = 400
-                    response_data = {'error': 'groupId é obrigatório'}
+                    response_data = {'error': 'groupId query parameter é obrigatório'}
                 else:
                     with SessionLocal() as session:
-                        group = session.query(Grupo).filter(Grupo.id == body['groupId']).first()
+                        group = session.query(Grupo).filter(Grupo.id == group_id).first()
                         if group:
                             users = [{'id': u.id, 'username': u.username} for u in group.members]
                             response_data = {'group_id': group.id, 'users': users}
