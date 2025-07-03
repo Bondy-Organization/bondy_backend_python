@@ -818,7 +818,7 @@ def start_server_manual_http():
     Starts the HTTP server using raw sockets and a while True loop.
     Each incoming connection is handled in a new thread.
     """
-    port = int(os.getenv('PORT', 8083))
+    port = int(os.getenv('PORT', 8080))
     host = '0.0.0.0' # Listen on all interfaces
 
     print(f"DEBUG: Starting server initialization...")
