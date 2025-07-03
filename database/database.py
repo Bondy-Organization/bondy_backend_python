@@ -16,7 +16,7 @@ raw_password = os.getenv("DB_PASSWORD")
 db_host = os.getenv("DB_HOST")
 db_port = os.getenv("DB_PORT")
 db_name = os.getenv("DB_NAME")
-db_password = quote_plus(raw_password)  # Codifica a senha para uso na URL
+db_password = None if raw_password == None else quote_plus(raw_password)  # Codifica a senha para uso na URL
 DATABASE_URL = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
 
 DATABASE_URL = os.getenv("DATABASE_URL", DATABASE_URL)  # Permite sobrescrever via .env

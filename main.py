@@ -3,6 +3,8 @@ import threading
 import requests
 import socket # For raw socket programming
 import json   # For handling JSON responses 
+from database.database import SessionLocal, User, Grupo, Message, add_message
+import time # Para um pequeno atraso
  
 # --- Global State Variables ---
 # These variables hold the system's operational status.
@@ -247,29 +249,29 @@ def format_http_response(status_code, content_type, body_data):
         error_response = b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
         return error_response
 
-# --- Client Handler (runs in a separate thread for each client) ---
+ 
+      
+# Handler de cliente
 def handle_client(client_socket, addr):
-    """
-    Handles a single client connection.
-    Reads request, applies middleware, routes, and sends response.
-    """
-    print(f"[{threading.current_thread().name}] DEBUG: Cliente conectado: {addr}")
     try:
-        # Read the initial request
-        print(f"[{threading.current_thread().name}] DEBUG: Setting socket timeout to 10 seconds")
-        client_socket.settimeout(10) # Short timeout for initial request read
+        # Read the HTTP request data
+        raw_request_data = b""
+        client_socket.settimeout(10)  # Set timeout for reading
         
-        print(f"[{threading.current_thread().name}] DEBUG: Waiting to receive data from {addr}")
-        try:
-            raw_request_data = client_socket.recv(4096) 
-            print(f"[{threading.current_thread().name}] DEBUG: recv() returned {len(raw_request_data) if raw_request_data else 0} bytes")
-        except socket.timeout:
-            print(f"[{threading.current_thread().name}] ERROR: Socket timeout while reading request from {addr}")
-            return
-        except Exception as e:
-            print(f"[{threading.current_thread().name}] ERROR: Exception while reading from socket: {e}")
-            return 
-        
+        # Read the request in chunks
+        while True:
+            try:
+                chunk = client_socket.recv(4096)
+                if not chunk:
+                    break
+                raw_request_data += chunk
+                # Check if we have received the complete headers (look for \r\n\r\n)
+                if b'\r\n\r\n' in raw_request_data:
+                    break
+            except socket.timeout:
+                print(f"[{threading.current_thread().name}] Socket timeout while reading from {addr}")
+                break
+            
         if not raw_request_data:
             print(f"[{threading.current_thread().name}] DEBUG: No data from {addr}, closing.")
             return
@@ -285,8 +287,7 @@ def handle_client(client_socket, addr):
             # body = request_info['body'] # Not used for this logic, but available
 
             # --- Middleware Logic ---
-            print(f"[{threading.current_thread().name}] DEBUG: Checking middleware - isAlive={get_is_alive()}, isActive={get_is_active()}")
-            allowed_paths = ['/health', '/fall', '/revive', '/groups', '/users', '/'] # Base allowed paths
+            allowed_paths = ['/health', '/fall', '/revive', '/groups', '/users'] # Base allowed paths
             # Also allow /subscribe/status, /subscribe/user, /notify/, and /user/ with optional query parameters
             subscribe_patterns = ['/subscribe/status', '/subscribe/user', '/notify/', '/user/']
             
@@ -314,158 +315,252 @@ def handle_client(client_socket, addr):
             response_data = {}
             status_code = 200
 
-            if method == 'GET':
-                if path == '/':
-                    FIXED_RESPONSE = b"HTTP/1.1 200 OK\r\n" \
-                 b"Content-Type: text/plain\r\n" \
-                 b"Content-Length: 19\r\n" \
-                 b"Connection: close\r\n" \
-                 b"\r\n" \
-                 b"Render Sanity check!"
-                    client_socket.sendall(FIXED_RESPONSE)
-                elif path == '/health':
-                    print(f"[{threading.current_thread().name}] DEBUG: Processing /health request")
-                    try:
-                        is_alive_val = get_is_alive()
-                        is_active_val = get_is_active()
-                        print(f"[{threading.current_thread().name}] DEBUG: State - alive={is_alive_val}, active={is_active_val}")
-                        response_data = {'status': 'alive' if is_alive_val else 'down', 'active': is_active_val}
-                        status_code = 200 if is_alive_val else 503
-                        print(f"[{threading.current_thread().name}] DEBUG: Response prepared - status={status_code}, data={response_data}")
-                        response_bytes = format_http_response(status_code, 'application/json', response_data)
-                        print(f"[{threading.current_thread().name}] DEBUG: Sending response, length={len(response_bytes)}")
-                        client_socket.sendall(response_bytes)
-                        print(f"[{threading.current_thread().name}] DEBUG: /health response sent successfully")
-                    except Exception as e:
-                        print(f"[{threading.current_thread().name}] ERROR in /health handler: {e}")
-                        import traceback
-                        traceback.print_exc()
-                elif path == "/home":
-                    html = "<html> <body>Chat</body> </html>"
-                    status_code = 200 
-                    response_bytes = format_http_response(status_code, 'text/html', html)
-                    client_socket.sendall(response_bytes)
-                elif path == '/groups':
-                    # List all active groups
-                    active_groups = get_active_groups()
-                    response_data = {'active_groups': active_groups, 'count': len(active_groups)}
-                    response_bytes = format_http_response(status_code, 'application/json', response_data)
-                    client_socket.sendall(response_bytes)
-                elif path == '/users':
-                    # List all users and their groups
-                    all_user_groups = get_all_user_groups()
-                    response_data = {'user_groups': all_user_groups, 'user_count': len(all_user_groups)}
-                    response_bytes = format_http_response(status_code, 'application/json', response_data)
-                    client_socket.sendall(response_bytes)
-                elif path.startswith('/user/'):
-                    # Get specific user's groups: GET /user/{user_id}/groups
-                    path_parts = path.split('/')
-                    if len(path_parts) >= 3:
-                        user_id = path_parts[2]
-                        if len(path_parts) >= 4 and path_parts[3] == 'groups':
-                            user_groups_list = list(get_user_groups(user_id))
-                            response_data = {'user_id': user_id, 'groups': user_groups_list}
-                            response_bytes = format_http_response(status_code, 'application/json', response_data)
-                            client_socket.sendall(response_bytes)
+            # ...existing code...
+
+            if method == 'POST' and path == '/login':
+                # Login: retorna o id do usuário pelo username
+                body = request_info.get('body')
+                if not body or 'username' not in body:
+                    status_code = 400
+                    response_data = {'error': 'username é obrigatório'}
+                else:
+                    with SessionLocal() as session:
+                        user = session.query(User).filter(User.username == body['username']).first()
+                        if user:
+                            response_data = {'user_id': user.id, 
+                                             
+                                             }
+                        else:
+                            # Create new user if doesn't exist
+                            new_user = User(username=body['username'],
+                            password_hash='admin123'
+                            )
+                            session.add(new_user)
+                            session.commit() 
+                            session.refresh(new_user)  # Get the generated ID
+                            response_data = {'user_id': new_user.id, 'created': True}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+
+            elif method == 'GET' and path == '/chats':
+                # Lista os grupos do usuário
+                body = request_info.get('body')
+                if not body or 'userId' not in body:
+                    status_code = 400
+                    response_data = {'error': 'userId é obrigatório'}
+                else:
+                    with SessionLocal() as session:
+                        user = session.query(User).filter(User.id == body['userId']).first()
+                        if user:
+                            chats = [{'id': g.id, 'name': g.name} for g in user.groups]
+                            response_data = {'user_id': user.id, 'chats': chats}
                         else:
                             status_code = 404
-                            response_data = {'error': 'Invalid user endpoint. Use /user/{user_id}/groups'}
+                            response_data = {'error': 'Usuário não encontrado'}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+
+            elif method == 'GET' and path == '/messages':
+                # Lista mensagens de um grupo
+                body = request_info.get('body')
+                if not body or 'groupId' not in body:
+                    status_code = 400
+                    response_data = {'error': 'groupId é obrigatório'}
+                else:
+                    with SessionLocal() as session:
+                        group = session.query(Grupo).filter(Grupo.id == body['groupId']).first()
+                        if group:
+                            messages = [
+                                {
+                                    'id': m.id,
+                                    'sender': m.sender.username,
+                                    'content': m.content,
+                                    'timestamp': m.timestamp.isoformat()
+                                }
+                                for m in group.messages
+                            ]
+                            response_data = {'group_id': group.id, 'messages': messages}
+                        else:
+                            status_code = 404
+                            response_data = {'error': 'Grupo não encontrado'}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+
+            elif method == 'POST' and path == '/messages':
+                # Envia mensagem para um grupo
+                body = request_info.get('body')
+                if not body or not all(k in body for k in ('userId', 'groupId', 'content')):
+                    status_code = 400
+                    response_data = {'error': 'userId, groupId e content são obrigatórios'}
+                else:
+                    with SessionLocal() as session:
+                        user = session.query(User).filter(User.id == body['userId']).first()
+                        group = session.query(Grupo).filter(Grupo.id == body['groupId']).first()
+                        if not user or not group:
+                            status_code = 404
+                            response_data = {'error': 'Usuário ou grupo não encontrado'}
+                        else:
+                            add_message(session, user, group, body['content'])
+                            response_data = {'message': 'Mensagem enviada'}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+
+            elif method == 'GET' and path == '/group-users':
+                # Lista usuários de um grupo
+                body = request_info.get('body')
+                if not body or 'groupId' not in body:
+                    status_code = 400
+                    response_data = {'error': 'groupId é obrigatório'}
+                else:
+                    with SessionLocal() as session:
+                        group = session.query(Grupo).filter(Grupo.id == body['groupId']).first()
+                        if group:
+                            users = [{'id': u.id, 'username': u.username} for u in group.members]
+                            response_data = {'group_id': group.id, 'users': users}
+                        else:
+                            status_code = 404
+                            response_data = {'error': 'Grupo não encontrado'}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+
+            elif method == 'DELETE' and path == '/messages':
+                # Remove mensagem por id
+                body = request_info.get('body')
+                if not body or 'messageId' not in body:
+                    status_code = 400
+                    response_data = {'error': 'messageId é obrigatório'}
+                else:
+                    with SessionLocal() as session:
+                        message = session.query(Message).filter(Message.id == body['messageId']).first()
+                        if message:
+                            session.delete(message)
+                            session.commit()
+                            response_data = {'message': 'Mensagem removida'}
+                        else:
+                            status_code = 404
+                            response_data = {'error': 'Mensagem não encontrada'}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+            # ...existing code...
+            elif method == 'GET':
+
+                    if path == '/':
+                        # Send a simple response for the root path
+                        response_content = "Render Sanity check!"
+                        response_bytes = format_http_response(200, 'text/plain', response_content)
+                        client_socket.sendall(response_bytes)
+                    elif path == '/health':
+                        print(f"[{threading.current_thread().name}] DEBUG: Processing /health request")
+                        try:
+                            is_alive_val = get_is_alive()
+                            is_active_val = get_is_active()
+                            print(f"[{threading.current_thread().name}] DEBUG: State - alive={is_alive_val}, active={is_active_val}")
+                            response_data = {'status': 'alive' if is_alive_val else 'down', 'active': is_active_val}
+                            status_code = 200 if is_alive_val else 503
+                            print(f"[{threading.current_thread().name}] DEBUG: Response prepared - status={status_code}, data={response_data}")
                             response_bytes = format_http_response(status_code, 'application/json', response_data)
+                            print(f"[{threading.current_thread().name}] DEBUG: Sending response, length={len(response_bytes)}")
                             client_socket.sendall(response_bytes)
-                    else:
-                        status_code = 400
-                        response_data = {'error': 'Invalid user path format'}
-                        response_bytes = format_http_response(status_code, 'application/json', response_data)
+                            print(f"[{threading.current_thread().name}] DEBUG: /health response sent successfully")
+                        except Exception as e:
+                            print(f"[{threading.current_thread().name}] ERROR in /health handler: {e}")
+                            import traceback
+                            traceback.print_exc()
+                    elif path == "/home":
+                        html = "<html> <body>Chat</body> </html>"
+                        status_code = 200 
+                        response_bytes = format_http_response(status_code, 'text/html', html)
                         client_socket.sendall(response_bytes)
-                elif path.startswith('/subscribe/status'):
-                    # --- Long-Polling Logic with Group Support ---
-                    # Extract group from query parameters or use default
-                    group_name = "default"  # Default group
-                    if '?' in path:
-                        query_part = path.split('?', 1)[1]
-                        for param in query_part.split('&'):
-                            if param.startswith('group='):
-                                group_name = param.split('=', 1)[1]
-                                break
-                    
-                    print(f"[{threading.current_thread().name}] Client {addr} started long-polling for status changes in group '{group_name}'.")
-                    
-                    # Get or create the condition variable for this group
-                    group_condition = get_or_create_group_condition(group_name)
-                    
-                    # Acquire lock before waiting on condition. Wait up to 25 seconds.
-                    # The condition variable will release the lock while waiting and re-acquire it upon waking.
-                    with group_condition:
-                        # Wait for a notification OR for the timeout to expire
-                        # This returns True if notified, False if timed out.
-                        notified = group_condition.wait(timeout=25) 
-                    
-                    is_alive_val = get_is_alive() # Get latest state after waiting
-                    is_active_val = get_is_active() # Get latest state after waiting
-
-                    if notified:
-                        print(f"[{threading.current_thread().name}] Notified of state change for {addr} in group '{group_name}'. Sending current status.")
-                        response_data = {'status': 'alive' if is_alive_val else 'down', 'active': is_active_val, 'change': True, 'group': group_name}
-                        status_code = 200
-                        response_bytes = format_http_response(status_code, 'application/json', response_data)
-                        client_socket.sendall(response_bytes)
-                    else:
-                        print(f"[{threading.current_thread().name}] Long-poll timeout for {addr} in group '{group_name}'. No state change. Sending 204.")
-                        # Send 204 No Content if no change within timeout
-                        response_bytes = format_http_response(204, 'application/json', None) 
-                        client_socket.sendall(response_bytes)
-                elif path.startswith('/subscribe/user'):
-                    # --- User-based Multi-Group Subscription ---
-                    # Extract user_id from query parameters
-                    user_id = None
-                    if '?' in path:
-                        query_part = path.split('?', 1)[1]
-                        for param in query_part.split('&'):
-                            if param.startswith('user_id='):
-                                user_id = param.split('=', 1)[1]
-                                break
-                    
-                    if not user_id:
-                        status_code = 400
-                        response_data = {'error': 'user_id parameter is required'}
-                        response_bytes = format_http_response(status_code, 'application/json', response_data)
-                        client_socket.sendall(response_bytes)
-                    else:
-                        print(f"[{threading.current_thread().name}] Client {addr} started user-based long-polling for user '{user_id}'.")
+                    elif path.startswith('/subscribe/status'):
+                        # --- Long-Polling Logic with Group Support ---
+                        # Extract group from query parameters or use default
+                        group_name = "default"  # Default group
+                        if '?' in path:
+                            query_part = path.split('?', 1)[1]
+                            for param in query_part.split('&'):
+                                if param.startswith('group='):
+                                    group_name = param.split('=', 1)[1]
+                                    break
                         
-                        # Wait for notifications on any of the user's groups
-                        notified, notified_group, user_group_list = wait_for_user_group_notifications(user_id, timeout=25)
+                        print(f"[{threading.current_thread().name}] Client {addr} started long-polling for status changes in group '{group_name}'.")
                         
-                        is_alive_val = get_is_alive()
-                        is_active_val = get_is_active()
-
+                        # Get or create the condition variable for this group
+                        group_condition = get_or_create_group_condition(group_name)
+                        
+                        # Acquire lock before waiting on condition. Wait up to 25 seconds.
+                        # The condition variable will release the lock while waiting and re-acquire it upon waking.
+                        with group_condition:
+                            # Wait for a notification OR for the timeout to expire
+                            # This returns True if notified, False if timed out.
+                            notified = group_condition.wait(timeout=25) 
+                        
+                        is_alive_val = get_is_alive() # Get latest state after waiting
+                        is_active_val = get_is_active() # Get latest state after waiting
+                    
+                
+            
                         if notified:
-                            print(f"[{threading.current_thread().name}] User '{user_id}' notified of change in group '{notified_group}'. Sending current status.")
-                            response_data = {
-                                'status': 'alive' if is_alive_val else 'down', 
-                                'active': is_active_val, 
-                                'change': True, 
-                                'user_id': user_id,
-                                'notified_group': notified_group,
-                                'user_groups': user_group_list
-                            }
+                            print(f"[{threading.current_thread().name}] Notified of state change for {addr} in group '{group_name}'. Sending current status.")
+                            response_data = {'status': 'alive' if is_alive_val else 'down', 'active': is_active_val, 'change': True, 'group': group_name}
                             status_code = 200
                             response_bytes = format_http_response(status_code, 'application/json', response_data)
                             client_socket.sendall(response_bytes)
                         else:
-                            print(f"[{threading.current_thread().name}] Long-poll timeout for user '{user_id}'. No state change. Sending 204.")
-                            response_bytes = format_http_response(204, 'application/json', None)
+                            print(f"[{threading.current_thread().name}] Long-poll timeout for {addr} in group '{group_name}'. No state change. Sending 204.")
+                            # Send 204 No Content if no change within timeout
+                            response_bytes = format_http_response(204, 'application/json', None) 
                             client_socket.sendall(response_bytes)
-                else: # Unhandled GET paths
-                    if get_is_alive() and get_is_active():
-                        status_code = 404
-                        response_data = {'error': 'Not Found'}
-                    else:
-                        status_code = 503
-                        response_data = {'error': 'system not available'}
-                    response_bytes = format_http_response(status_code, 'application/json', response_data)
-                    client_socket.sendall(response_bytes)
+                    elif path.startswith('/subscribe/user'):
+                        # --- User-based Multi-Group Subscription ---
+                        # Extract user_id from query parameters
+                        user_id = None
+                        if '?' in path:
+                            query_part = path.split('?', 1)[1]
+                            for param in query_part.split('&'):
+                                if param.startswith('user_id='):
+                                    user_id = param.split('=', 1)[1]
+                                    break
+                        
+                        if not user_id:
+                            status_code = 400
+                            response_data = {'error': 'user_id parameter is required'}
+                            response_bytes = format_http_response(status_code, 'application/json', response_data)
+                            client_socket.sendall(response_bytes)
+                        else:
+                            print(f"[{threading.current_thread().name}] Client {addr} started user-based long-polling for user '{user_id}'.")
+                            
+                            # Wait for notifications on any of the user's groups
+                            notified, notified_group, user_group_list = wait_for_user_group_notifications(user_id, timeout=25)
+                            
+                            is_alive_val = get_is_alive()
+                            is_active_val = get_is_active()
 
+                            if notified:
+                                print(f"[{threading.current_thread().name}] User '{user_id}' notified of change in group '{notified_group}'. Sending current status.")
+                                response_data = {
+                                    'status': 'alive' if is_alive_val else 'down', 
+                                    'active': is_active_val, 
+                                    'change': True, 
+                                    'user_id': user_id,
+                                    'notified_group': notified_group,
+                                    'user_groups': user_group_list
+                                }
+                                status_code = 200
+                                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                                client_socket.sendall(response_bytes)
+                            else:
+                                print(f"[{threading.current_thread().name}] Long-poll timeout for user '{user_id}'. No state change. Sending 204.")
+                                response_bytes = format_http_response(204, 'application/json', None)
+                                client_socket.sendall(response_bytes)
+                    else: # Unhandled GET paths
+                            if get_is_alive() and get_is_active():
+                                status_code = 404
+                                response_data = {'error': 'Not Found'}
+                            else:
+                                status_code = 503
+                                response_data = {'error': 'system not available'}
+                            response_bytes = format_http_response(status_code, 'application/json', response_data)
+                            client_socket.sendall(response_bytes)
             elif method == 'POST':
                 if path == '/fall':
                     set_is_alive(False) # This will trigger notify_clients_of_state_change()
@@ -493,42 +588,7 @@ def handle_client(client_socket, addr):
                     else:
                         status_code = 400
                         response_data = {'error': 'Invalid notify path. Use /notify/{group_name} or /notify/all'}
-                elif path.startswith('/user/'):
-                    # User-group management endpoints
-                    # POST /user/{user_id}/groups - Set user's groups (from JSON body)
-                    # POST /user/{user_id}/groups/{group_name} - Add user to group
-                    path_parts = path.split('/')
-                    if len(path_parts) >= 4:
-                        user_id = path_parts[2]
-                        if path_parts[3] == 'groups':
-                            if len(path_parts) == 4:
-                                # POST /user/{user_id}/groups - Set user's groups from JSON body
-                                body = request_info.get('body')
-                                if isinstance(body, dict) and 'groups' in body:
-                                    group_names = body['groups']
-                                    if isinstance(group_names, list):
-                                        set_user_groups(user_id, group_names)
-                                        print(f"[{threading.current_thread().name}] Set groups for user '{user_id}': {group_names}")
-                                        response_data = {'user_id': user_id, 'groups': group_names, 'message': 'groups updated'}
-                                    else:
-                                        status_code = 400
-                                        response_data = {'error': 'groups must be an array'}
-                                else:
-                                    status_code = 400
-                                    response_data = {'error': 'JSON body with groups array required'}
-                            elif len(path_parts) >= 5:
-                                # POST /user/{user_id}/groups/{group_name} - Add user to group
-                                group_name = path_parts[4]
-                                add_user_to_group(user_id, group_name)
-                                print(f"[{threading.current_thread().name}] Added user '{user_id}' to group '{group_name}'")
-                                user_groups_list = list(get_user_groups(user_id))
-                                response_data = {'user_id': user_id, 'added_to_group': group_name, 'all_groups': user_groups_list}
-                        else:
-                            status_code = 400
-                            response_data = {'error': 'Invalid user endpoint. Use /user/{user_id}/groups'}
-                    else:
-                        status_code = 400
-                        response_data = {'error': 'Invalid user path format'}
+                
                 else: # Unhandled POST paths
                     if get_is_alive() and get_is_active():
                         status_code = 404
@@ -538,29 +598,6 @@ def handle_client(client_socket, addr):
                         response_data = {'error': 'system not available'}
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
-            elif method == 'DELETE':
-                if path.startswith('/user/'):
-                    # DELETE /user/{user_id}/groups/{group_name} - Remove user from group
-                    path_parts = path.split('/')
-                    if len(path_parts) >= 5 and path_parts[3] == 'groups':
-                        user_id = path_parts[2]
-                        group_name = path_parts[4]
-                        remove_user_from_group(user_id, group_name)
-                        print(f"[{threading.current_thread().name}] Removed user '{user_id}' from group '{group_name}'")
-                        user_groups_list = list(get_user_groups(user_id))
-                        response_data = {'user_id': user_id, 'removed_from_group': group_name, 'remaining_groups': user_groups_list}
-                        response_bytes = format_http_response(status_code, 'application/json', response_data)
-                        client_socket.sendall(response_bytes)
-                    else:
-                        status_code = 400
-                        response_data = {'error': 'Invalid DELETE path. Use /user/{user_id}/groups/{group_name}'}
-                        response_bytes = format_http_response(status_code, 'application/json', response_data)
-                        client_socket.sendall(response_bytes)
-                else:
-                    status_code = 404
-                    response_data = {'error': 'Not Found'}
-                    response_bytes = format_http_response(status_code, 'application/json', response_data)
-                    client_socket.sendall(response_bytes)
             elif method == 'HEAD': # <-- NOVO BLOCO PARA HEAD
                 if path == '/health':
                     print(f"[{threading.current_thread().name}] DEBUG: Processing HEAD /health request (for health check)")
@@ -625,6 +662,11 @@ def handle_client(client_socket, addr):
                 client_socket.sendall(response_bytes)
             except:
                 print(f"[{threading.current_thread().name}] ERROR: Failed to send error response to {addr}")
+        # Adiciona um pequeno atraso antes de fechar o socket (pode ajudar com proxies)
+        time.sleep(0.1) 
+        
+    except Exception as e:
+        print(f"Error handling client {addr}: {e}")
     finally:
         print(f"[{threading.current_thread().name}] DEBUG: Closing connection with {addr}.")
         try:
