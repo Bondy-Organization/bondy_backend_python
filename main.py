@@ -224,12 +224,17 @@ def format_http_response(status_code, content_type, body_data):
         
         print(f"DEBUG: body_bytes length: {len(body_bytes)}")
         
-        # Build HTTP response with proper CRLF line endings
+        # Build HTTP response with proper CRLF line endings and CORS headers
         headers = [
             f"HTTP/1.1 {status_code} {status_message}",
             f"Content-Type: {content_type}",
             f"Content-Length: {len(body_bytes)}", 
-            "Connection: close"
+            "Connection: close",
+            # CORS headers
+            "Access-Control-Allow-Origin: *",
+            "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS, HEAD",
+            "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With",
+            "Access-Control-Max-Age: 86400"  # Cache preflight for 24 hours
         ]
         
         # Properly format HTTP response: headers + \r\n\r\n + body
@@ -287,7 +292,7 @@ def handle_client(client_socket, addr):
             # body = request_info['body'] # Not used for this logic, but available
 
             # --- Middleware Logic ---
-            allowed_paths = ['/health', '/fall', '/revive', '/groups', '/users'] # Base allowed paths
+            allowed_paths = ['/health', '/fall', '/revive', '/groups', '/users', '/login', '/chats', '/messages', '/group-users'] # Base allowed paths
             # Also allow /subscribe/status, /subscribe/user, /notify/, and /user/ with optional query parameters
             subscribe_patterns = ['/subscribe/status', '/subscribe/user', '/notify/', '/user/']
             
@@ -305,7 +310,7 @@ def handle_client(client_socket, addr):
                         is_allowed_by_middleware = True
                         break
 
-            if (not get_is_alive() or not get_is_active()) and not is_allowed_by_middleware:
+            if (not get_is_alive() or not get_is_active()) and not is_allowed_by_middleware and method != 'OPTIONS':
                 print(f"[{threading.current_thread().name}] Request to {path} blocked: System not available (isAlive={get_is_alive()}, isActive={get_is_active()})")
                 response_bytes = format_http_response(503, 'application/json', {'error': 'system not available'})
                 client_socket.sendall(response_bytes)
@@ -327,17 +332,17 @@ def handle_client(client_socket, addr):
                     with SessionLocal() as session:
                         user = session.query(User).filter(User.username == body['username']).first()
                         if user:
-                            response_data = {'user_id': user.id, 
-                                             
-                                             }
+                            # Sync user groups from database
+                            sync_user_groups_from_database(user.id)
+                            response_data = {'user_id': user.id}
                         else:
                             # Create new user if doesn't exist
-                            new_user = User(username=body['username'],
-                            password_hash='admin123'
-                            )
+                            new_user = User(username=body['username'], password_hash='admin123')
                             session.add(new_user)
                             session.commit() 
                             session.refresh(new_user)  # Get the generated ID
+                            # Sync user groups from database (will be empty for new user)
+                            sync_user_groups_from_database(new_user.id)
                             response_data = {'user_id': new_user.id, 'created': True}
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
@@ -401,6 +406,8 @@ def handle_client(client_socket, addr):
                             response_data = {'error': 'Usuário ou grupo não encontrado'}
                         else:
                             add_message(session, user, group, body['content'])
+                            # Notify group members of new message
+                            notify_group_of_change(group.name)
                             response_data = {'message': 'Mensagem enviada'}
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
@@ -598,6 +605,13 @@ def handle_client(client_socket, addr):
                         response_data = {'error': 'system not available'}
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
+            elif method == 'OPTIONS': # <-- CORS Preflight requests
+                # Handle CORS preflight requests
+                print(f"[{threading.current_thread().name}] DEBUG: Processing OPTIONS request for CORS preflight")
+                # Return 200 OK with CORS headers (no body needed)
+                response_bytes = format_http_response(200, 'text/plain', None)
+                client_socket.sendall(response_bytes)
+                print(f"[{threading.current_thread().name}] DEBUG: OPTIONS response sent successfully")
             elif method == 'HEAD': # <-- NOVO BLOCO PARA HEAD
                 if path == '/health':
                     print(f"[{threading.current_thread().name}] DEBUG: Processing HEAD /health request (for health check)")
@@ -917,4 +931,31 @@ def test_format_http_response():
     print("READABLE FORMAT:")
     print(response_str)
     print("="*50)
+
+def sync_user_groups_from_database(user_id):
+    """
+    Syncs user-group memberships from database to in-memory storage.
+    Call this when a user logs in or when group memberships change.
+    """
+    try:
+        with SessionLocal() as session:
+            user = session.query(User).filter(User.id == user_id).first()
+            if user:
+                group_names = [group.name for group in user.groups]
+                set_user_groups(user_id, group_names)
+                print(f"DEBUG: Synced user {user_id} groups: {group_names}")
+                return group_names
+            else:
+                print(f"DEBUG: User {user_id} not found in database")
+                return []
+    except Exception as e:
+        print(f"ERROR syncing user groups for user {user_id}: {e}")
+        return []
+
+def notify_group_of_change(group_name):
+    """
+    Notifies a specific group of changes (like new messages).
+    """
+    print(f"DEBUG: Notifying group '{group_name}' of changes")
+    notify_clients_of_state_change(group_name)
 
