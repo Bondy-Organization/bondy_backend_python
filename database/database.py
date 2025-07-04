@@ -50,7 +50,7 @@ class User(Base):
 class Grupo(Base):
     __tablename__ = "grupos"
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False, unique=True)
+    name = Column(String, nullable=False, unique=False)
     created_at = Column(DateTime, default=datetime.now)
 
     # Um grupo pode ter vários membros (muitos-para-muitos)

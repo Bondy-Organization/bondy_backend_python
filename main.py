@@ -366,7 +366,15 @@ def handle_client(client_socket, addr):
                     with SessionLocal() as session:
                         user = session.query(User).filter(User.id == user_id).first()
                         if user:
-                            chats = [{'id': g.id, 'name': g.name} for g in user.groups]
+                            chats = [
+                                {
+                                    'id': g.id, 
+                                    'name': g.name,
+                                    'members': [{'id': m.id, 'username': m.username} for m in g.members]
+                                } 
+                                for g in user.groups
+                            ]
+ 
                             response_data = {'user_id': user.id, 'chats': chats}
                         else:
                             status_code = 404

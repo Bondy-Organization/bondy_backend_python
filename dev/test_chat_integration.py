@@ -48,9 +48,29 @@ def test_full_chat_flow():
     alice_chats = response.json()
     print(f"Alice's chats: {alice_chats}")
     
+    # Verify Alice's chats include members
+    if 'chats' in alice_chats and len(alice_chats['chats']) > 0:
+        first_chat = alice_chats['chats'][0]
+        if 'members' in first_chat:
+            print(f"✅ Alice's chat includes {len(first_chat['members'])} members")
+            for member in first_chat['members']:
+                print(f"   - {member['username']} (ID: {member['id']})")
+        else:
+            print("❌ Alice's chat missing members list")
+    
     response = requests.get(f"{BASE_URL}/chats?userId={bob_id}")
     bob_chats = response.json()
     print(f"Bob's chats: {bob_chats}")
+    
+    # Verify Bob's chats include members
+    if 'chats' in bob_chats and len(bob_chats['chats']) > 0:
+        first_chat = bob_chats['chats'][0]
+        if 'members' in first_chat:
+            print(f"✅ Bob's chat includes {len(first_chat['members'])} members")
+            for member in first_chat['members']:
+                print(f"   - {member['username']} (ID: {member['id']})")
+        else:
+            print("❌ Bob's chat missing members list")
     
     # Step 4: Send a message to the group
     print("\n4. Sending message to the group...")

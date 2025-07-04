@@ -106,18 +106,39 @@ GET /chats?userId=123
 
 **Response:**
 ```json
-[
-    {
-        "id": 456,
-        "name": "General Chat",
-        "member_count": 5
-    },
-    {
-        "id": 789,
-        "name": "Project Team",
-        "member_count": 3
-    }
-]
+{
+    "user_id": 123,
+    "chats": [
+        {
+            "id": 456,
+            "name": "General Chat",
+            "members": [
+                {
+                    "id": 123,
+                    "username": "john_doe"
+                },
+                {
+                    "id": 124,
+                    "username": "jane_smith"
+                }
+            ]
+        },
+        {
+            "id": 789,
+            "name": "Project Team",
+            "members": [
+                {
+                    "id": 123,
+                    "username": "john_doe"
+                },
+                {
+                    "id": 125,
+                    "username": "bob_wilson"
+                }
+            ]
+        }
+    ]
+}
 ```
 
 #### POST /add-user-to-group
