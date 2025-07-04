@@ -508,11 +508,11 @@ def handle_client(client_socket, addr):
                             response_data = {'error': 'Creator user not found'}
                         else:
                             # Check if group name already exists
-                            existing_group = session.query(Grupo).filter(Grupo.name == body['groupName']).first()
-                            if existing_group:
-                                status_code = 409
-                                response_data = {'error': 'Group name already exists'}
-                            else:
+                            #existing_group = session.query(Grupo).filter(Grupo.name == body['groupName']).first()
+                            #if existing_group:
+                            #    status_code = 409
+                            #    response_data = {'error': 'Group name already exists'}
+                            #else:
                                 # Create new group
                                 new_group = Grupo(name=body['groupName'])
                                 session.add(new_group)
