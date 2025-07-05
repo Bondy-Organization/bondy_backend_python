@@ -134,30 +134,20 @@ class SyncManager(threading.Thread):
                     response.raise_for_status()
                     peer_status = response.json()
                     
-                    peer_is_active = peer_status.get('active')
+                    peer_is_active = peer_status.get('active') == True
                     
                     if peer_is_active is True:
                         if self.get_active():
-                            self.set_active(False)
-                            print("SyncManager: Peer is active, setting self to inactive.")
+                            if not is_me_primary:
+                                # If I'm Secondary and peer is active, I should yield to Primary
+                                self.set_active(False)
+                                print("SyncManager: Peer is active, setting self to inactive (yielding to Primary).")
                     elif peer_is_active is False:
-                        if is_me_primary:
-                            if not self.get_active():
-                                self.set_active(True)
-                                print("SyncManager: Peer is inactive and I am Primary, setting self to active.")
-                        else:
-                            if self.get_active():
-                                self.set_active(False)
-                                print("SyncManager: Peer is inactive and I am Secondary, remaining inactive (or yielding if active).")
-                    else:
-                        if is_me_primary:
-                            if not self.get_active():
-                                self.set_active(True)
-                                print("SyncManager: Peer status unknown and I am Primary, setting self to active (assuming peer down).")
-                        else:
-                            if self.get_active():
-                                self.set_active(False)
-                                print("SyncManager: Peer status unknown and I am Secondary, remaining inactive (or yielding if active).")
+                     
+                        if not self.get_active():
+                            self.set_active(True)
+                            print("SyncManager: Peer is inactive and I am Primary, setting self to active.")
+                    
                 else:
                     if self.get_active():
                         self.set_active(False)
@@ -341,27 +331,43 @@ def handle_client(client_socket, addr):
             # Extract base path without query parameters for middleware check
             base_path = path.split('?')[0]
             print('checking path ' + base_path + ' for allowed')
-            allowed_paths = ['/health', '/fall', '/revive', '/groups', '/users', '/login', '/chats', '/messages', '/group-users', '/create-chat'] # Base allowed paths
-            # Also allow /subscribe/status, /subscribe/user, /notify/, and /user/ with optional query parameters
-            subscribe_patterns = ['/subscribe/status', '/subscribe/user', '/notify/', '/user/']
+            
+            # Define paths that are always allowed regardless of system state
+            always_allowed_paths = ['/health', '/fall', '/revive']
+            
+            # Define paths that require the system to be active
+            active_required_paths = ['/groups', '/users', '/login', '/chats', '/messages', '/group-users', '/create-chat']
+            
+            # Define patterns that require the system to be active
+            active_required_patterns = ['/subscribe/status', '/subscribe/user', '/notify/', '/user/']
             
             is_allowed_by_middleware = False
-            # Check exact matches first
-            for allowed_path in allowed_paths:
-                if base_path == allowed_path: 
-                    is_allowed_by_middleware = True
-                    break
             
-            # Check subscribe patterns (allowing query parameters)
-            if not is_allowed_by_middleware:
-                for pattern in subscribe_patterns:
-                    if base_path.startswith(pattern):
-                        is_allowed_by_middleware = True
-                        break
+            # Always allow certain paths regardless of system state
+            if base_path in always_allowed_paths:
+                is_allowed_by_middleware = True
+            # For other paths, check if system is active
+            elif get_is_alive() and get_is_active():
+                # System is active, allow all other paths
+                if base_path in active_required_paths:
+                    is_allowed_by_middleware = True
+                else:
+                    # Check active required patterns
+                    for pattern in active_required_patterns:
+                        if base_path.startswith(pattern):
+                            is_allowed_by_middleware = True
+                            break
 
-            if (not get_is_alive() or not get_is_active()) and not is_allowed_by_middleware and method != 'OPTIONS':
-                print(f"[{threading.current_thread().name}] Request to {path} blocked: System not available (isAlive={get_is_alive()}, isActive={get_is_active()})")
-                response_bytes = format_http_response(503, 'application/json', {'error': 'system not available'})
+            if not is_allowed_by_middleware and method != 'OPTIONS': 
+                if not get_is_alive():
+                    print(f"[{threading.current_thread().name}] Request to {path} blocked: System not alive")
+                    response_bytes = format_http_response(503, 'application/json', {'error': 'system not available - not alive'})
+                elif not get_is_active():
+                    print(f"[{threading.current_thread().name}] Request to {path} blocked: System not active")
+                    response_bytes = format_http_response(503, 'application/json', {'error': 'system not available - not active'})
+                else:
+                    print(f"[{threading.current_thread().name}] Request to {path} blocked: Path not allowed")
+                    response_bytes = format_http_response(404, 'application/json', {'error': 'Not Found'})
                 client_socket.sendall(response_bytes)
                 return # End connection after sending error
 
