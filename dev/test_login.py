@@ -109,29 +109,31 @@ print("=" * 60)
 print("TESTING LOCAL SERVER")
 print("=" * 60)
 
-local_base_url = "http://localhost:8083"
+local_base_url = None#"http://localhost:8083"
 
-# Test normal login cases
-for user_data in test_users:
-    test_login(local_base_url, user_data["username"])
+if local_base_url != None:
+    # Test normal login cases
+    for user_data in test_users:
+        test_login(local_base_url, user_data["username"])
 
-# Test error cases
-test_login_error_cases(local_base_url)
+    # Test error cases
+    test_login_error_cases(local_base_url)
 
-# Test remote server
-print("\n" + "=" * 60)
+    # Test remote server
+    print("\n" + "=" * 60)
 print("TESTING REMOTE SERVER")
 print("=" * 60)
 
-remote_base_url = "https://bondy-backend-python-mi3a.onrender.com"
+remote_base_url = 'https://bondy-backend-python-mi3a.onrender.com/' if False else "https://bondy-oru7l52q.b4a.run"
 
-# Test normal login cases
-for user_data in test_users:
-    test_login(remote_base_url, user_data["username"])
+if remote_base_url != None:
+    # Test normal login cases
+    for user_data in test_users:
+        test_login(remote_base_url, user_data["username"])
 
-# Test error cases
-test_login_error_cases(remote_base_url)
+    # Test error cases 
+    test_login_error_cases(remote_base_url)
 
-print("\n" + "=" * 60)
-print("TESTING COMPLETED")
-print("=" * 60)
+    print("\n" + "=" * 60)
+    print("TESTING COMPLETED")
+    print("=" * 60)

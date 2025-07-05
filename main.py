@@ -76,6 +76,7 @@ def get_is_active():
 
 def set_is_active(val):
     """Thread-safe setter for _is_active."""
+ 
     global _is_active
     with state_lock:
         old_is_active = _is_active
@@ -123,30 +124,41 @@ class SyncManager(threading.Thread):
             return
 
         print(f"SyncManager started, syncing with peer: {self.peer_url}/health")
+
+        is_me_primary = os.getenv('IS_PRIMARY', 'false').lower() == 'true' 
+        
         while not self._stop_event.is_set():
+            #time.sleep(5)
             try:
                 if self.get_alive():
                     response = requests.get(f"{self.peer_url}/health", timeout=5)
                     response.raise_for_status()
                     peer_status = response.json()
                     
-                    if peer_status.get('active') is True:
-                        if not self.get_active():
-                            self.set_active(True) # This will trigger notify_clients_of_state_change()
-                            print("SyncManager: Peer is active, setting self to active.")
-                    else:
+                    peer_is_active = peer_status.get('active') == True
+                    
+                    if peer_is_active is True:
                         if self.get_active():
-                            self.set_active(False) # This will trigger notify_clients_of_state_change()
-                            print("SyncManager: Peer is inactive, setting self to inactive.")
+                            if not is_me_primary:
+                                # If I'm Secondary and peer is active, I should yield to Primary
+                                self.set_active(False)
+                                print("SyncManager: Peer is active, setting self to inactive (yielding to Primary).")
+                    elif peer_is_active is False:
+                     
+                        if not self.get_active():
+                            self.set_active(True)
+                            print("SyncManager: Peer is inactive, setting self to active.")
+                    
                 else:
                     if self.get_active():
-                        self.set_active(False) # This will trigger notify_clients_of_state_change()
-                        print("SyncManager: System is not alive, forcing self to inactive.")
+                        self.set_active(False)
+                        print("SyncManager: This node is not alive, forcing self to inactive.")
 
             except requests.exceptions.RequestException as e:
-                if self.get_active():
-                    self.set_active(False) # This will trigger notify_clients_of_state_change()
-                    print(f"SyncManager: Error communicating with peer ({self.peer_url}/health): {e}. Setting self to inactive.")
+                print('SyncManager: Error communicating with peer:', e)
+                #if self.get_active(): 
+                    #self.set_active(False) # This will trigger notify_clients_of_state_change()
+                    #print(f"SyncManager: Error communicating with peer ({self.peer_url}/health): {e}. Setting self to inactive.")
             except Exception as e:
                 print(f"SyncManager: An unexpected error occurred: {e}")
             
@@ -171,37 +183,61 @@ def parse_http_request(raw_request_data):
     Manually parses a raw HTTP request.
     Returns a dictionary with 'method', 'path', 'headers', and 'body'.
     """
-    request_lines = raw_request_data.decode('utf-8').split('\r\n')
-    
-    # Parse request line (e.g., GET /health HTTP/1.1)
-    request_line_parts = request_lines[0].split(' ')
-    if len(request_line_parts) < 3:
-        raise ValueError("Invalid HTTP request line")
-    
-    method = request_line_parts[0]
-    path = request_line_parts[1]
-    
-    headers = {}
-    body_start_index = -1
-    for i, line in enumerate(request_lines[1:]):
-        if not line: # Empty line signifies end of headers
-            body_start_index = i + 2 # +2 because we are in request_lines[1:] and adding 1 for current line
-            break
-        parts = line.split(':', 1)
-        if len(parts) == 2:
-            headers[parts[0].strip().lower()] = parts[1].strip()
+    try:
+        # Try UTF-8 first, fallback to latin-1 if that fails
+        #try:
+        decoded_data = raw_request_data.decode('utf-8')
+        #except UnicodeDecodeError:
+        #print(f"DEBUG: UTF-8 decode failed, trying latin-1. Raw data length: {len(raw_request_data)}")
+        # latin-1 can decode any byte sequence
+        #decoded_data = raw_request_data.decode('latin-1')
+        
+        print(f"DEBUG: Successfully decoded request data: {decoded_data[:200]}...")  # Show first 200 chars
+        request_lines = decoded_data.split('\r\n')
+        
+        # Parse request line (e.g., GET /health HTTP/1.1)
+        if not request_lines or not request_lines[0]:
+            raise ValueError("Empty request data")
+            
+        request_line_parts = request_lines[0].split(' ')
+        if len(request_line_parts) < 3:
+            raise ValueError(f"Invalid HTTP request line: {request_lines[0]}")
+        
+        method = request_line_parts[0]
+        path = request_line_parts[1]
+         
+        headers = {}
+        body_start_index = -1
+        for i, line in enumerate(request_lines[1:]):
+            if not line: # Empty line signifies end of headers
+                body_start_index = i + 2 # +2 because we are in request_lines[1:] and adding 1 for current line
+                break
+            parts = line.split(':', 1)
+            if len(parts) == 2:
+                headers[parts[0].strip().lower()] = parts[1].strip()
 
-    body = ""
-    if body_start_index != -1 and body_start_index < len(request_lines):
-        body = "\r\n".join(request_lines[body_start_index:])
-        # Simple JSON body parsing for POST requests
-        if 'content-type' in headers and 'application/json' in headers['content-type'] and body:
-            try:
-                body = json.loads(body)
-            except json.JSONDecodeError:
-                body = None # Invalid JSON body
+        body = ""
+        if body_start_index != -1 and body_start_index < len(request_lines):
+            body = "\r\n".join(request_lines[body_start_index:])
+            # Simple JSON body parsing for POST requests
+            if 'content-type' in headers and 'application/json' in headers['content-type'] and body:
+                try:
+                    body = json.loads(body)
+                except json.JSONDecodeError:
+                    body = None # Invalid JSON body
 
-    return {'method': method, 'path': path, 'headers': headers, 'body': body}
+        return {'method': method, 'path': path, 'headers': headers, 'body': body}
+        
+    except UnicodeDecodeError as e:
+        print(f"DEBUG: Unicode decode error: {e}")
+        print(f"DEBUG: Raw data (first 50 bytes): {raw_request_data[:50]}")
+        print(f"DEBUG: Raw data as hex: {raw_request_data[:50].hex()}")
+        raise ValueError(f"Unable to decode request data: {e}")
+    except Exception as e:
+        print(f"DEBUG: Error parsing HTTP request: {e}")
+        print(f"DEBUG: Raw data length: {len(raw_request_data)}")
+        print(f"DEBUG: Raw data (first 50 bytes as hex): {raw_request_data[:50].hex()}")
+        raise ValueError(f"Invalid HTTP request format: {e}")
 
 def format_http_response(status_code, content_type, body_data):
     """
@@ -225,12 +261,17 @@ def format_http_response(status_code, content_type, body_data):
         
         print(f"DEBUG: body_bytes length: {len(body_bytes)}")
         
-        # Build HTTP response with proper CRLF line endings
+        # Build HTTP response with proper CRLF line endings and CORS headers
         headers = [
             f"HTTP/1.1 {status_code} {status_message}",
             f"Content-Type: {content_type}",
             f"Content-Length: {len(body_bytes)}", 
-            "Connection: close"
+            "Connection: close",
+            # CORS headers
+            "Access-Control-Allow-Origin: *",
+            "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS, HEAD",
+            "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With",
+            "Access-Control-Max-Age: 86400"  # Cache preflight for 24 hours
         ]
         
         # Properly format HTTP response: headers + \r\n\r\n + body
@@ -288,27 +329,46 @@ def handle_client(client_socket, addr):
             # body = request_info['body'] # Not used for this logic, but available
 
             # --- Middleware Logic ---
-            allowed_paths = ['/health', '/fall', '/revive', '/groups', '/users'] # Base allowed paths
-            # Also allow /subscribe/status, /subscribe/user, /notify/, and /user/ with optional query parameters
-            subscribe_patterns = ['/subscribe/status', '/subscribe/user', '/notify/', '/user/']
+            # Extract base path without query parameters for middleware check
+            base_path = path.split('?')[0]
+            print('checking path ' + base_path + ' for allowed')
+            
+            # Define paths that are always allowed regardless of system state
+            always_allowed_paths = ['/health', '/fall', '/revive']
+            
+            # Define paths that require the system to be active
+            active_required_paths = ['/groups', '/users', '/login', '/chats', '/messages', '/group-users', '/create-chat']
+            
+            # Define patterns that require the system to be active
+            active_required_patterns = ['/subscribe/status', '/subscribe/user', '/notify/', '/user/']
             
             is_allowed_by_middleware = False
-            # Check exact matches first
-            for allowed_path in allowed_paths:
-                if path == allowed_path: 
-                    is_allowed_by_middleware = True
-                    break
             
-            # Check subscribe patterns (allowing query parameters)
-            if not is_allowed_by_middleware:
-                for pattern in subscribe_patterns:
-                    if path.startswith(pattern):
-                        is_allowed_by_middleware = True
-                        break
+            # Always allow certain paths regardless of system state
+            if base_path in always_allowed_paths:
+                is_allowed_by_middleware = True
+            # For other paths, check if system is active
+            elif get_is_alive() and get_is_active():
+                # System is active, allow all other paths
+                if base_path in active_required_paths:
+                    is_allowed_by_middleware = True
+                else:
+                    # Check active required patterns
+                    for pattern in active_required_patterns:
+                        if base_path.startswith(pattern):
+                            is_allowed_by_middleware = True
+                            break
 
-            if (not get_is_alive() or not get_is_active()) and not is_allowed_by_middleware:
-                print(f"[{threading.current_thread().name}] Request to {path} blocked: System not available (isAlive={get_is_alive()}, isActive={get_is_active()})")
-                response_bytes = format_http_response(503, 'application/json', {'error': 'system not available'})
+            if not is_allowed_by_middleware and method != 'OPTIONS': 
+                if not get_is_alive():
+                    print(f"[{threading.current_thread().name}] Request to {path} blocked: System not alive")
+                    response_bytes = format_http_response(503, 'application/json', {'error': 'system not available - not alive'})
+                elif not get_is_active():
+                    print(f"[{threading.current_thread().name}] Request to {path} blocked: System not active")
+                    response_bytes = format_http_response(503, 'application/json', {'error': 'system not available - not active'})
+                else:
+                    print(f"[{threading.current_thread().name}] Request to {path} blocked: Path not allowed")
+                    response_bytes = format_http_response(404, 'application/json', {'error': 'Not Found'})
                 client_socket.sendall(response_bytes)
                 return # End connection after sending error
 
@@ -375,17 +435,32 @@ def handle_client(client_socket, addr):
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
 
-            elif method == 'GET' and path == '/chats':
-                # Lista os grupos do usuário
-                body = request_info.get('body')
-                if not body or 'userId' not in body:
+            elif method == 'GET' and path.startswith('/chats'):
+                # Lista os grupos do usuário - using query parameters
+                user_id = None
+                if '?' in path:
+                    query_part = path.split('?', 1)[1]
+                    for param in query_part.split('&'):
+                        if param.startswith('userId='):
+                            user_id = param.split('=', 1)[1]
+                            break
+                
+                if not user_id:
                     status_code = 400
-                    response_data = {'error': 'userId é obrigatório'}
+                    response_data = {'error': 'userId query parameter é obrigatório'}
                 else:
                     with SessionLocal() as session:
-                        user = session.query(User).filter(User.id == body['userId']).first()
+                        user = session.query(User).filter(User.id == user_id).first()
                         if user:
-                            chats = [{'id': g.id, 'name': g.name} for g in user.groups]
+                            chats = [
+                                {
+                                    'id': g.id, 
+                                    'name': g.name,
+                                    'members': [{'id': m.id, 'username': m.username} for m in g.members]
+                                } 
+                                for g in user.groups
+                            ]
+ 
                             response_data = {'user_id': user.id, 'chats': chats}
                         else:
                             status_code = 404
@@ -393,15 +468,22 @@ def handle_client(client_socket, addr):
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
 
-            elif method == 'GET' and path == '/messages':
-                # Lista mensagens de um grupo
-                body = request_info.get('body')
-                if not body or 'groupId' not in body:
+            elif method == 'GET' and path.startswith('/messages'):
+                # Lista mensagens de um grupo - using query parameters
+                group_id = None
+                if '?' in path:
+                    query_part = path.split('?', 1)[1]
+                    for param in query_part.split('&'):
+                        if param.startswith('groupId='):
+                            group_id = param.split('=', 1)[1]
+                            break
+                
+                if not group_id:
                     status_code = 400
-                    response_data = {'error': 'groupId é obrigatório'}
+                    response_data = {'error': 'groupId query parameter é obrigatório'}
                 else:
                     with SessionLocal() as session:
-                        group = session.query(Grupo).filter(Grupo.id == body['groupId']).first()
+                        group = session.query(Grupo).filter(Grupo.id == group_id).first()
                         if group:
                             messages = [
                                 {
@@ -422,6 +504,7 @@ def handle_client(client_socket, addr):
             elif method == 'POST' and path == '/messages':
                 # Envia mensagem para um grupo
                 body = request_info.get('body')
+                print(f"[{threading.current_thread().name}] DEBUG: Received body for /messages: {body}")
                 if not body or not all(k in body for k in ('userId', 'groupId', 'content')):
                     status_code = 400
                     response_data = {'error': 'userId, groupId e content são obrigatórios'}
@@ -434,25 +517,55 @@ def handle_client(client_socket, addr):
                             response_data = {'error': 'Usuário ou grupo não encontrado'}
                         else:
                             add_message(session, user, group, body['content'])
+                            # Notify group members of new message
+                            notify_group_of_change(group.name)
                             response_data = {'message': 'Mensagem enviada'}
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
 
-            elif method == 'GET' and path == '/group-users':
-                # Lista usuários de um grupo
-                body = request_info.get('body')
-                if not body or 'groupId' not in body:
+            elif method == 'GET' and path.startswith('/group-users'):
+                # Lista usuários de um grupo - using query parameters
+                group_id = None
+                if '?' in path:
+                    query_part = path.split('?', 1)[1]
+                    for param in query_part.split('&'):
+                        if param.startswith('groupId='):
+                            group_id = param.split('=', 1)[1]
+                            break
+                
+                if not group_id:
                     status_code = 400
-                    response_data = {'error': 'groupId é obrigatório'}
+                    response_data = {'error': 'groupId query parameter é obrigatório'}
                 else:
                     with SessionLocal() as session:
-                        group = session.query(Grupo).filter(Grupo.id == body['groupId']).first()
+                        group = session.query(Grupo).filter(Grupo.id == group_id).first()
                         if group:
                             users = [{'id': u.id, 'username': u.username} for u in group.members]
                             response_data = {'group_id': group.id, 'users': users}
                         else:
                             status_code = 404
                             response_data = {'error': 'Grupo não encontrado'}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+            
+            elif method == 'GET' and path == '/users':
+                # Busca usuários por filtro de nome (parcial ou exato)
+                 
+                filtro_nome = None
+
+                if '?' in path:
+                    query_part = path.split('?', 1)[1]
+                    for param in query_part.split('&'):
+                        if param.startswith('username='):
+                            filtro_nome = param.split('=', 1)[1]
+                            break
+                
+                with SessionLocal() as session:
+                    query = session.query(User)
+                    if filtro_nome:
+                        query = query.filter(User.username.ilike(f"%{filtro_nome}%"))
+                    users = [{'id': u.id, 'username': u.username} for u in query.all()]
+                    response_data = {'users': users}
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
 
@@ -466,6 +579,93 @@ def handle_client(client_socket, addr):
                     with SessionLocal() as session:
                         message = session.query(Message).filter(Message.id == body['messageId']).first()
                         if message:
+                            session.delete(message)
+                            session.commit()
+                            response_data = {'message': 'Mensagem removida'}
+                        else:
+                            status_code = 404
+                            response_data = {'error': 'Mensagem não encontrada'}
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+
+            elif method == 'POST' and path == '/create-chat':
+                # Create a new chat group
+                body = request_info.get('body')
+                if not body or not all(k in body for k in ('groupName', 'creatorId')):
+                    status_code = 400
+                    response_data = {'error': 'groupName and creatorId are required'}
+                else:
+                    with SessionLocal() as session:
+                        # Check if creator user exists
+                        creator = session.query(User).filter(User.id == body['creatorId']).first()
+                        if not creator:
+                            status_code = 404
+                            response_data = {'error': 'Creator user not found'}
+                        else:
+                            # Check if group name already exists
+                            #existing_group = session.query(Grupo).filter(Grupo.name == body['groupName']).first()
+                            #if existing_group:
+                            #    status_code = 409
+                            #    response_data = {'error': 'Group name already exists'}
+                            #else:
+                                # Create new group
+                                new_group = Grupo(name=body['groupName'])
+                                session.add(new_group)
+                                session.flush()  # To get the ID before commit
+                                
+                                # Add creator as member
+                                new_group.members.append(creator)
+                                added_members = [{'id': creator.id, 'username': creator.username}]
+                                
+                                # Process additional members if provided
+                                members_list = body.get('members', [])
+                                not_found_members = []
+                                
+                                if members_list:
+                                    for username in members_list:
+                                        if username != creator.username:  # Skip creator (already added)
+                                            member_user = session.query(User).filter(User.username == username).first()
+                                            if member_user:
+                                                # Check if member is not already in the group
+                                                if member_user not in new_group.members:
+                                                    new_group.members.append(member_user)
+                                                    added_members.append({'id': member_user.id, 'username': member_user.username})
+                                            else:
+                                                not_found_members.append(username)
+                                
+                                session.commit()
+                                session.refresh(new_group)
+                                
+                                # Sync user groups for all members
+                                for member in new_group.members:
+                                    sync_user_groups_from_database(member.id)
+                                
+                                response_data = {
+                                    'group_id': new_group.id,
+                                    'group_name': new_group.name,
+                                    'creator_id': creator.id,
+                                    'members': added_members
+                                }
+                                
+                                # Include warning about not found members if any
+                                if not_found_members:
+                                    response_data['warning'] = f'Users not found: {", ".join(not_found_members)}'
+                                
+                                print(f"DEBUG: Created new group '{new_group.name}' (ID: {new_group.id}) with creator {creator.username} and {len(added_members)-1} additional members")
+                response_bytes = format_http_response(status_code, 'application/json', response_data)
+                client_socket.sendall(response_bytes)
+
+            elif method == 'DELETE' and path == '/messages':
+                # Remove mensagem por id
+                body = request_info.get('body')
+                if not body or 'messageId' not in body:
+                    status_code = 400
+                    response_data = {'error': 'messageId é obrigatório'}
+                else:
+                    with SessionLocal() as session:
+                        message = session.query(Message).filter(Message.id == body['messageId']).first()
+                        if message:
+                            
                             session.delete(message)
                             session.commit()
                             response_data = {'message': 'Mensagem removida'}
@@ -554,7 +754,7 @@ def handle_client(client_socket, addr):
                                     user_id = param.split('=', 1)[1]
                                     break
                         
-                        if not user_id:
+                        if not user_id: 
                             status_code = 400
                             response_data = {'error': 'user_id parameter is required'}
                             response_bytes = format_http_response(status_code, 'application/json', response_data)
@@ -570,13 +770,40 @@ def handle_client(client_socket, addr):
 
                             if notified:
                                 print(f"[{threading.current_thread().name}] User '{user_id}' notified of change in group '{notified_group}'. Sending current status.")
-                                response_data = {
-                                    'status': 'alive' if is_alive_val else 'down', 
-                                    'active': is_active_val, 
+                                
+                                # Get recent messages from the notified group
+                                recent_messages = []
+                                if notified_group:
+                                    try:
+                                        with SessionLocal() as session:
+                                            group = session.query(Grupo).filter(Grupo.name == notified_group).first()
+                                            if group:
+                                                # Get the last 10 messages from this group
+                                                messages = session.query(Message).filter(
+                                                    Message.group_id == group.id
+                                                ).order_by(Message.timestamp.desc()).limit(10).all()
+                                                
+                                                recent_messages = [
+                                                    {
+                                                        'id': m.id,
+                                                        'sender': m.sender.username,
+                                                        'content': m.content,
+                                                        'timestamp': m.timestamp.isoformat(),
+                                                        'group_id': m.group_id,
+                                                        'group_name': group.name
+                                                    }
+                                                    for m in reversed(messages)  # Reverse to get chronological order
+                                                ]
+                                    except Exception as e: 
+                                        print(f"ERROR getting recent messages for group {notified_group}: {e}")
+                                
+                                response_data = { 
                                     'change': True, 
                                     'user_id': user_id,
                                     'notified_group': notified_group,
-                                    'user_groups': user_group_list
+                                    'user_groups': user_group_list,
+                                    'recent_messages': recent_messages,
+                                    'messages_count': len(recent_messages)
                                 }
                                 status_code = 200
                                 response_bytes = format_http_response(status_code, 'application/json', response_data)
@@ -631,6 +858,13 @@ def handle_client(client_socket, addr):
                         response_data = {'error': 'system not available'}
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
+            elif method == 'OPTIONS': # <-- CORS Preflight requests
+                # Handle CORS preflight requests
+                print(f"[{threading.current_thread().name}] DEBUG: Processing OPTIONS request for CORS preflight")
+                # Return 200 OK with CORS headers (no body needed)
+                response_bytes = format_http_response(200, 'text/plain', None)
+                client_socket.sendall(response_bytes)
+                print(f"[{threading.current_thread().name}] DEBUG: OPTIONS response sent successfully")
             elif method == 'HEAD': # <-- NOVO BLOCO PARA HEAD
                 if path == '/health':
                     print(f"[{threading.current_thread().name}] DEBUG: Processing HEAD /health request (for health check)")
@@ -708,60 +942,137 @@ def handle_client(client_socket, addr):
             print(f"[{threading.current_thread().name}] ERROR: Failed to close socket for {addr}")
 
 # --- User-Group Management ---
-# Dictionary to store user group memberships
-user_groups = {}  # user_id -> set of group_names
-user_groups_lock = threading.Lock()
+# Database-based user group management (replaces in-memory dictionary)
 
 def get_user_groups(user_id):
     """
-    Gets the groups that a user belongs to.
+    Gets the groups that a user belongs to from the database.
     Returns a set of group names.
     """
-    with user_groups_lock:
-        return user_groups.get(user_id, set()).copy()
+    try:
+        with SessionLocal() as session:
+            user = session.query(User).filter(User.id == user_id).first()
+            if user:
+                group_names = {group.name for group in user.groups}
+                return group_names
+            else:
+                return set()
+    except Exception as e:
+        print(f"ERROR getting user groups for user {user_id}: {e}")
+        return set()
 
 def add_user_to_group(user_id, group_name):
     """
-    Adds a user to a group.
+    Adds a user to a group in the database.
     """
-    with user_groups_lock:
-        if user_id not in user_groups:
-            user_groups[user_id] = set()
-        user_groups[user_id].add(group_name)
+    try:
+        with SessionLocal() as session:
+            user = session.query(User).filter(User.id == user_id).first()
+            group = session.query(Grupo).filter(Grupo.name == group_name).first()
+            
+            if user and group:
+                if group not in user.groups:
+                    user.groups.append(group)
+                    session.commit()
+                    print(f"DEBUG: Added user {user_id} to group {group_name}")
+                    return True
+                else:
+                    print(f"DEBUG: User {user_id} already in group {group_name}")
+                    return True
+            else:
+                print(f"DEBUG: User {user_id} or group {group_name} not found")
+                return False
+    except Exception as e:
+        print(f"ERROR adding user {user_id} to group {group_name}: {e}")
+        return False
 
 def remove_user_from_group(user_id, group_name):
     """
-    Removes a user from a group.
+    Removes a user from a group in the database.
     """
-    with user_groups_lock:
-        if user_id in user_groups:
-            user_groups[user_id].discard(group_name)
-            if not user_groups[user_id]:  # Remove user if no groups left
-                del user_groups[user_id]
+    try:
+        with SessionLocal() as session:
+            user = session.query(User).filter(User.id == user_id).first()
+            group = session.query(Grupo).filter(Grupo.name == group_name).first()
+            
+            if user and group:
+                if group in user.groups:
+                    user.groups.remove(group)
+                    session.commit()
+                    print(f"DEBUG: Removed user {user_id} from group {group_name}")
+                    return True
+                else:
+                    print(f"DEBUG: User {user_id} not in group {group_name}")
+                    return True
+            else:
+                print(f"DEBUG: User {user_id} or group {group_name} not found")
+                return False
+    except Exception as e:
+        print(f"ERROR removing user {user_id} from group {group_name}: {e}")
+        return False
 
 def set_user_groups(user_id, group_names):
     """
-    Sets all groups for a user (replaces existing groups).
+    Sets all groups for a user (replaces existing groups) in the database.
     """
-    with user_groups_lock:
-        if group_names:
-            user_groups[user_id] = set(group_names)
-        elif user_id in user_groups:
-            del user_groups[user_id]
+    try:
+        with SessionLocal() as session:
+            user = session.query(User).filter(User.id == user_id).first()
+            if user:
+                # Clear existing groups
+                user.groups.clear()
+                
+                # Add new groups
+                for group_name in group_names:
+                    group = session.query(Grupo).filter(Grupo.name == group_name).first()
+                    if group:
+                        user.groups.append(group)
+                    else:
+                        print(f"DEBUG: Group {group_name} not found when setting user groups")
+                
+                session.commit()
+                print(f"DEBUG: Set user {user_id} groups to: {group_names}")
+                return True
+            else:
+                print(f"DEBUG: User {user_id} not found")
+                return False
+    except Exception as e:
+        print(f"ERROR setting user groups for user {user_id}: {e}")
+        return False
 
 def get_all_users_in_group(group_name):
     """
-    Gets all users that belong to a specific group.
+    Gets all users that belong to a specific group from the database.
+    Returns a list of user IDs as strings.
     """
-    with user_groups_lock:
-        return [user_id for user_id, groups in user_groups.items() if group_name in groups]
+    try:
+        with SessionLocal() as session:
+            group = session.query(Grupo).filter(Grupo.name == group_name).first()
+            if group:
+                user_ids = [str(member.id) for member in group.members]
+                return user_ids
+            else:
+                return []
+    except Exception as e:
+        print(f"ERROR getting users in group {group_name}: {e}")
+        return []
 
 def get_all_user_groups():
     """
-    Returns a copy of the entire user-group mapping.
+    Returns a dictionary of all user-group mappings from the database.
     """
-    with user_groups_lock:
-        return {user_id: groups.copy() for user_id, groups in user_groups.items()}
+    try:
+        with SessionLocal() as session:
+            user_groups_dict = {}
+            users = session.query(User).all()
+            for user in users:
+                group_names = {group.name for group in user.groups}
+                if group_names:
+                    user_groups_dict[str(user.id)] = group_names
+            return user_groups_dict
+    except Exception as e:
+        print(f"ERROR getting all user groups: {e}")
+        return {}
 
 def wait_for_user_group_notifications(user_id, timeout=25):
     """
@@ -772,26 +1083,29 @@ def wait_for_user_group_notifications(user_id, timeout=25):
     
     if not user_group_list:
         # User has no groups, return immediately
+        print(f"DEBUG: User {user_id} has no groups to wait on.")
         return False, None, []
     
     # Create condition variables for all user groups
     conditions = []
     for group_name in user_group_list:
+        print('DEBUG: Waiting on group condition for:', group_name)
         conditions.append(get_or_create_group_condition(group_name))
     
     # Use a shared event to coordinate between multiple condition waits
     notification_event = threading.Event()
-    notified_group = threading.local()
-    notified_group.value = None
+    # Use a list to share the notified group name between threads
+    notified_group_container = [None]
     
     def wait_on_condition(condition, group_name):
         """Helper function to wait on a single condition"""
         try:
             with condition:
                 if condition.wait(timeout=timeout):
-                    notified_group.value = group_name
+                    notified_group_container[0] = group_name
+                    print(f"DEBUG: Notified for group {group_name}")
                     notification_event.set()
-        except Exception as e:
+        except Exception as e: 
             print(f"Error waiting on condition for group {group_name}: {e}")
     
     # Start threads to wait on each condition
@@ -813,7 +1127,11 @@ def wait_for_user_group_notifications(user_id, timeout=25):
     for thread in wait_threads:
         thread.join(timeout=0.1)
     
-    return notified, getattr(notified_group, 'value', None), user_group_list
+    # Get the notified group from the container
+    notified_group = notified_group_container[0]
+    print(f"DEBUG: Final notified_group value: {notified_group}")
+    
+    return notified, notified_group, user_group_list
 
 # --- Enhanced Group Functions ---
 
@@ -845,13 +1163,50 @@ def enhanced_notify_clients_of_state_change(group_name=None):
                 with condition:
                     condition.notify_all()
 
+
+# Test function to verify HTTP response format
+def test_format_http_response():
+    """Test the HTTP response formatting function"""
+    test_data = {'status': 'alive', 'active': True}
+    response_bytes = format_http_response(200, 'application/json', test_data)
+    response_str = response_bytes.decode('utf-8')
+    print("="*50)
+    print("TEST HTTP RESPONSE:")
+    print(repr(response_str))
+    print("="*50)
+    print("READABLE FORMAT:")
+    print(response_str)
+    print("="*50)
+
+def sync_user_groups_from_database(user_id):
+    """
+    Syncs user-group memberships from database.
+    This function is now simplified since we query the database directly.
+    """
+    try:
+        group_names = list(get_user_groups(user_id))
+        print(f"DEBUG: User {user_id} groups from database: {group_names}")
+        return group_names
+    except Exception as e:
+        print(f"ERROR syncing user groups for user {user_id}: {e}")
+        return []
+
+def notify_group_of_change(group_name):
+    """
+    Notifies a specific group of changes (like new messages).
+    """
+    print(f"DEBUG: Notifying group '{group_name}' of changes")
+    notify_clients_of_state_change(group_name)
+
+
+
 # --- Main Server Loop ---
 def start_server_manual_http():
     """
     Starts the HTTP server using raw sockets and a while True loop.
     Each incoming connection is handled in a new thread.
     """
-    port = int(os.getenv('PORT', 8080))
+    port = int(os.getenv('PORT', 8082))
     host = '0.0.0.0' # Listen on all interfaces
 
     print(f"DEBUG: Starting server initialization...")
@@ -936,18 +1291,4 @@ if __name__ == '__main__':
             sync_manager.join(timeout=2)
             print("SyncManager thread stopped.")
         print("Application shut down cleanly.")
-
-# Test function to verify HTTP response format
-def test_format_http_response():
-    """Test the HTTP response formatting function"""
-    test_data = {'status': 'alive', 'active': True}
-    response_bytes = format_http_response(200, 'application/json', test_data)
-    response_str = response_bytes.decode('utf-8')
-    print("="*50)
-    print("TEST HTTP RESPONSE:")
-    print(repr(response_str))
-    print("="*50)
-    print("READABLE FORMAT:")
-    print(response_str)
-    print("="*50)
 
