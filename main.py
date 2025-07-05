@@ -124,6 +124,7 @@ class SyncManager(threading.Thread):
 
         print(f"SyncManager started, syncing with peer: {self.peer_url}/health")
         while not self._stop_event.is_set():
+            time.sleep(5)
             try:
                 if self.get_alive():
                     response = requests.get(f"{self.peer_url}/health", timeout=5)
