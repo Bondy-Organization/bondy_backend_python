@@ -123,6 +123,9 @@ class SyncManager(threading.Thread):
             return
 
         print(f"SyncManager started, syncing with peer: {self.peer_url}/health")
+
+        is_me_primary = os.getenv('IS_PRIMARY', 'false').lower() == 'true' 
+        
         while not self._stop_event.is_set():
             time.sleep(5)
             try:
@@ -131,17 +134,34 @@ class SyncManager(threading.Thread):
                     response.raise_for_status()
                     peer_status = response.json()
                     
-                    if peer_status.get('active') is True:
+                    peer_is_active = peer_status.get('active')
+                    
+                    if peer_is_active is True:
                         if self.get_active():
-                            self.set_active(False)  
-                    else:
-                        if peer_status.get('active') is False:
+                            self.set_active(False)
+                            print("SyncManager: Peer is active, setting self to inactive.")
+                    elif peer_is_active is False:
+                        if is_me_primary:
                             if not self.get_active():
-                                self.set_active(True) 
-                else: 
-                    if self.get_active():  
-                        self.set_active(False)  
-                        print("SyncManager: System is not alive, forcing self to inactive.")
+                                self.set_active(True)
+                                print("SyncManager: Peer is inactive and I am Primary, setting self to active.")
+                        else:
+                            if self.get_active():
+                                self.set_active(False)
+                                print("SyncManager: Peer is inactive and I am Secondary, remaining inactive (or yielding if active).")
+                    else:
+                        if is_me_primary:
+                            if not self.get_active():
+                                self.set_active(True)
+                                print("SyncManager: Peer status unknown and I am Primary, setting self to active (assuming peer down).")
+                        else:
+                            if self.get_active():
+                                self.set_active(False)
+                                print("SyncManager: Peer status unknown and I am Secondary, remaining inactive (or yielding if active).")
+                else:
+                    if self.get_active():
+                        self.set_active(False)
+                        print("SyncManager: This node is not alive, forcing self to inactive.")
 
             except requests.exceptions.RequestException as e:
                 pass
