@@ -155,10 +155,10 @@ python main.py
 #### Linux/macOS:
 
 ```bash
-export PORT=8081
-export IS_ACTIVE=false
+PORT=8081
+IS_ACTIVE=false
 IS_PRIMARY=false
-export PEER_URL=http://localhost:8080
+PEER_URL=http://localhost:8080
 python main.py
 ```
 
