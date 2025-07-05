@@ -135,9 +135,10 @@ class SyncManager(threading.Thread):
                         if self.get_active():
                             self.set_active(False)  
                     else:
-                        if not self.get_active():
-                            self.set_active(True) 
-                else:
+                        if peer_status.get('active') is False:
+                            if not self.get_active():
+                                self.set_active(True) 
+                else: 
                     if self.get_active():  
                         self.set_active(False)  
                         print("SyncManager: System is not alive, forcing self to inactive.")
