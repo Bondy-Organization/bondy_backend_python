@@ -154,11 +154,14 @@ python main.py
 
 #### Linux/macOS:
 
-```bash
+```env
 PORT=8081
 IS_ACTIVE=false
 IS_PRIMARY=false
 PEER_URL=http://localhost:8080
+```
+
+```bash
 python main.py
 ```
 
