@@ -127,7 +127,7 @@ class SyncManager(threading.Thread):
         is_me_primary = os.getenv('IS_PRIMARY', 'false').lower() == 'true' 
         
         while not self._stop_event.is_set():
-            time.sleep(5)
+            #time.sleep(5)
             try:
                 if self.get_alive():
                     response = requests.get(f"{self.peer_url}/health", timeout=5)
@@ -146,7 +146,7 @@ class SyncManager(threading.Thread):
                      
                         if not self.get_active():
                             self.set_active(True)
-                            print("SyncManager: Peer is inactive and I am Primary, setting self to active.")
+                            print("SyncManager: Peer is inactive, setting self to active.")
                     
                 else:
                     if self.get_active():
@@ -154,7 +154,7 @@ class SyncManager(threading.Thread):
                         print("SyncManager: This node is not alive, forcing self to inactive.")
 
             except requests.exceptions.RequestException as e:
-                pass
+                print('SyncManager: Error communicating with peer:', e)
                 #if self.get_active(): 
                     #self.set_active(False) # This will trigger notify_clients_of_state_change()
                     #print(f"SyncManager: Error communicating with peer ({self.peer_url}/health): {e}. Setting self to inactive.")
