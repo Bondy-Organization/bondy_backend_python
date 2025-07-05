@@ -156,6 +156,8 @@ class SyncManager(threading.Thread):
 
             except requests.exceptions.RequestException as e:
                 print('SyncManager: Error communicating with peer:', e)
+                if not self.get_active():
+                    self.set_active(True) 
                 #if self.get_active(): 
                     #self.set_active(False) # This will trigger notify_clients_of_state_change()
                     #print(f"SyncManager: Error communicating with peer ({self.peer_url}/health): {e}. Setting self to inactive.")
