@@ -7,7 +7,7 @@ import requests
 import json
 
 # Server URL
-BASE_URL = "http://127.0.0.1:8080"
+BASE_URL = "http://127.0.0.1:8082"
 
 def test_create_chat():
     """Test creating a new chat group"""

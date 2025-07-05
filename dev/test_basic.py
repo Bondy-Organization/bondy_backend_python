@@ -5,7 +5,7 @@ import json
 
 # Configuration
 BASE_URL = "https://bondy-backend-python-mi3a.onrender.com"
-# BASE_URL = "http://localhost:8083"  # Uncomment for local testing
+BASE_URL = "http://localhost:8082"  # Uncomment for local testing
 
 def test_basic_endpoints():
     """Test basic server endpoints"""
