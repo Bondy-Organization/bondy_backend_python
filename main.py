@@ -142,9 +142,10 @@ class SyncManager(threading.Thread):
                         print("SyncManager: System is not alive, forcing self to inactive.")
 
             except requests.exceptions.RequestException as e:
-                if self.get_active():
-                    self.set_active(False) # This will trigger notify_clients_of_state_change()
-                    print(f"SyncManager: Error communicating with peer ({self.peer_url}/health): {e}. Setting self to inactive.")
+                pass
+                #if self.get_active(): 
+                    #self.set_active(False) # This will trigger notify_clients_of_state_change()
+                    #print(f"SyncManager: Error communicating with peer ({self.peer_url}/health): {e}. Setting self to inactive.")
             except Exception as e:
                 print(f"SyncManager: An unexpected error occurred: {e}")
             
