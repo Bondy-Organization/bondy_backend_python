@@ -161,7 +161,7 @@ class SyncManager(threading.Thread):
                     #print(f"SyncManager: Error communicating with peer ({self.peer_url}/health): {e}. Setting self to inactive.")
             except Exception as e:
                 print(f"SyncManager: An unexpected error occurred: {e}")
-            
+              
             self._stop_event.wait(5)
 
     def stop(self):
