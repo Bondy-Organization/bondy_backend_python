@@ -6,7 +6,7 @@
 
 import requests
 
-url = "http://localhost:8080/register"  # Replace with your actual URL
+url = "https://bondy-backend-python-mi3a.onrender.com/register"  # Replace with your actual URL
 response = requests.post(url, json={
     "username": "testuser",
     "password": "testpassword",

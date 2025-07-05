@@ -75,6 +75,7 @@ def get_is_active():
         return _is_active
 
 def set_is_active(val):
+    return
     """Thread-safe setter for _is_active."""
  
     global _is_active
@@ -339,7 +340,7 @@ def handle_client(client_socket, addr):
             always_allowed_paths = ['/health', '/fall', '/revive']
             
             # Define paths that require the system to be active
-            active_required_paths = ['/groups', '/users', '/login', '/chats', '/messages', '/group-users', '/create-chat']
+            active_required_paths = ['/register','/groups', '/users', '/login', '/chats', '/messages', '/group-users', '/create-chat']
             
             # Define patterns that require the system to be active
             active_required_patterns = ['/subscribe/status', '/subscribe/user', '/notify/', '/user/']
@@ -370,6 +371,7 @@ def handle_client(client_socket, addr):
                     response_bytes = format_http_response(503, 'application/json', {'error': 'system not available - not active'})
                 else:
                     print(f"[{threading.current_thread().name}] Request to {path} blocked: Path not allowed")
+                    print(f'only allows: ' + str(always_allowed_paths + active_required_paths + active_required_patterns))
                     response_bytes = format_http_response(404, 'application/json', {'error': 'Not Found'})
                 client_socket.sendall(response_bytes)
                 return # End connection after sending error

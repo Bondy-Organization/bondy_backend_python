@@ -28,7 +28,7 @@ if False:
 # Test remote server
 print("Testing remote server...")
 
-remote_server = 'https://bondy-backend-python-mi3a.onrender.com/' if False else 'https://bondy-oru7l52q.b4a.run/'
+remote_server = 'https://bondy-backend-python-mi3a.onrender.com/' if True else 'https://bondy-oru7l52q.b4a.run/'
 try:
     # Test /
     print("Testing /...")
