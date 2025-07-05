@@ -730,8 +730,6 @@ def handle_client(client_socket, addr):
                         is_alive_val = get_is_alive() # Get latest state after waiting
                         is_active_val = get_is_active() # Get latest state after waiting
                     
-                
-            
                         if notified:
                             print(f"[{threading.current_thread().name}] Notified of state change for {addr} in group '{group_name}'. Sending current status.")
                             response_data = {'status': 'alive' if is_alive_val else 'down', 'active': is_active_val, 'change': True, 'group': group_name}
