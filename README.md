@@ -80,8 +80,8 @@ O servidor mantém a conexão do cliente aberta no endpoint `/subscribe/status`,
 #### 1. Clone o Repositório
 
 ```bash
-git clone <URL_DO_SEU_REPOSITORIO>
-cd <nome_da_pasta_do_projeto>
+git clone https://github.com/Bondy-Organization/bondy_backend_python.git
+cd bondy_backend_python
 ```
 
 #### 2. Crie e Ative um Ambiente Virtual
