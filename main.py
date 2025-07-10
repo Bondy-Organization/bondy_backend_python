@@ -156,7 +156,10 @@ class SyncManager(threading.Thread):
 
             except requests.exceptions.RequestException as e:
                 print('SyncManager: Error communicating with peer:', e)
+                
+                print('SyncManager: checking if self is active')
                 if not self.get_active():
+                    print("SyncManager: Self is not active, setting self to active.")
                     self.set_active(True) 
                 #if self.get_active(): 
                     #self.set_active(False) # This will trigger notify_clients_of_state_change()
