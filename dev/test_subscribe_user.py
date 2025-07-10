@@ -93,6 +93,7 @@ print("TESTING LOCAL SERVER")
 
 local_base_url = "http://localhost:8082"
 
+local_base_url = 'https://bondy-backend-python-mi3a.onrender.com'
 # Simple subscription test with result capture 
 #simple_result = test_user_subscription(local_base_url, "7", 10)
 #print(f"\n📋 Simple Test Result Summary:")

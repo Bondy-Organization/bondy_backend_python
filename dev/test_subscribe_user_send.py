@@ -119,7 +119,7 @@ def demo_subscription_workflow(base_url):
     try:
         login_response = requests.post(
             f"{base_url}/login",
-            json={"username": "anna"},
+            json={"username": "anna", 'password': 'test123'},
             headers={'Content-Type': 'application/json'},
             timeout=10
         )
@@ -154,6 +154,7 @@ def demo_subscription_workflow(base_url):
 
 local_base_url = "http://localhost:8082"
 
+local_base_url = 'https://bondy-backend-python-mi3a.onrender.com'
  
 # Full workflow demo
 demo_subscription_workflow(local_base_url)

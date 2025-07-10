@@ -75,7 +75,6 @@ def get_is_active():
         return _is_active
 
 def set_is_active(val):
-    return
     """Thread-safe setter for _is_active."""
  
     global _is_active
