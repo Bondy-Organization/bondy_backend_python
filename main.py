@@ -128,7 +128,7 @@ class SyncManager(threading.Thread):
         is_me_primary = os.getenv('IS_PRIMARY', 'false').lower() == 'true' 
         
         while not self._stop_event.is_set():
-            #time.sleep(5)
+            time.sleep(3)
             try:
                 if self.get_alive():
                     response = requests.get(f"{self.peer_url}/health", timeout=5)
