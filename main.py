@@ -136,7 +136,7 @@ class SyncManager(threading.Thread):
                     peer_status = response.json()
                     
                     peer_is_active = peer_status.get('active') == True
-                    
+                     
                     if peer_is_active is True:
                         if self.get_active():
                             if not is_me_primary:
