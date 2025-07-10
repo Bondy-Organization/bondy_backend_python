@@ -255,6 +255,7 @@ def format_http_response(status_code, content_type, body_data):
         body_bytes = b""
         if body_data is not None and status_code != 204:
             if isinstance(body_data, dict):
+                
                 body_bytes = json.dumps(body_data).encode('utf-8')
                 print(f"DEBUG: Serialized JSON to {len(body_bytes)} bytes: {body_bytes}")
             else:
