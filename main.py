@@ -395,14 +395,6 @@ def handle_client(client_socket, addr):
                         else: # Errados
                             status_code = 401 # Unauthorized
                             response_data = {'error': 'Invalid username or password'}
-                            # Create new user if doesn't exist mantive caso dê zebra
-                            #new_user = User(username=body['username'],
-                            #password_hash='admin123'
-                            #)
-                            ##session.add(new_user)
-                            #session.commit() 
-                            #session.refresh(new_user)  # Get the generated ID
-                            #response_data = {'user_id': new_user.id, 'created': True}
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
 
@@ -657,26 +649,6 @@ def handle_client(client_socket, addr):
                                 print(f"DEBUG: Created new group '{new_group.name}' (ID: {new_group.id}) with creator {creator.username} and {len(added_members)-1} additional members")
                 response_bytes = format_http_response(status_code, 'application/json', response_data)
                 client_socket.sendall(response_bytes)
-
-            elif method == 'DELETE' and path == '/messages':
-                # Remove mensagem por id
-                body = request_info.get('body')
-                if not body or 'messageId' not in body:
-                    status_code = 400
-                    response_data = {'error': 'messageId é obrigatório'}
-                else:
-                    with SessionLocal() as session:
-                        message = session.query(Message).filter(Message.id == body['messageId']).first()
-                        if message:
-                            
-                            session.delete(message)
-                            session.commit()
-                            response_data = {'message': 'Mensagem removida'}
-                        else:
-                            status_code = 404
-                            response_data = {'error': 'Mensagem não encontrada'}
-                response_bytes = format_http_response(status_code, 'application/json', response_data)
-                client_socket.sendall(response_bytes)
             # ...existing code...
             elif method == 'GET':
 
@@ -688,7 +660,10 @@ def handle_client(client_socket, addr):
                     elif path == '/health':
                         print(f"[{threading.current_thread().name}] DEBUG: Processing /health request")
                         try:
+                            
+                            print(f"[{threading.current_thread().name}] DEBUG: Processing /health get_is_alive")
                             is_alive_val = get_is_alive()
+                            print(f"[{threading.current_thread().name}] DEBUG: Processing /health get_is_active")
                             is_active_val = get_is_active()
                             print(f"[{threading.current_thread().name}] DEBUG: State - alive={is_alive_val}, active={is_active_val}")
                             response_data = {'status': 'alive' if is_alive_val else 'down', 'active': is_active_val}
@@ -700,7 +675,7 @@ def handle_client(client_socket, addr):
                             print(f"[{threading.current_thread().name}] DEBUG: /health response sent successfully")
                         except Exception as e:
                             print(f"[{threading.current_thread().name}] ERROR in /health handler: {e}")
-                            import traceback
+                            import traceback 
                             traceback.print_exc()
                     elif path == "/home":
                         html = "<html> <body>Chat</body> </html>"
