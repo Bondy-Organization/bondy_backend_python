@@ -80,8 +80,8 @@ O servidor mantém a conexão do cliente aberta no endpoint `/subscribe/status`,
 #### 1. Clone o Repositório
 
 ```bash
-git clone <URL_DO_SEU_REPOSITORIO>
-cd <nome_da_pasta_do_projeto>
+git clone https://github.com/Bondy-Organization/bondy_backend_python.git
+cd bondy_backend_python
 ```
 
 #### 2. Crie e Ative um Ambiente Virtual
@@ -142,6 +142,7 @@ python main.py
 ```env
 PORT=8080
 IS_ACTIVE=true
+IS_PRIMARY=true
 PEER_URL=http://localhost:8081
 ```
 
@@ -153,10 +154,14 @@ python main.py
 
 #### Linux/macOS:
 
+```env
+PORT=8081
+IS_ACTIVE=false
+IS_PRIMARY=false
+PEER_URL=http://localhost:8080
+```
+
 ```bash
-export PORT=8081
-export IS_ACTIVE=false
-export PEER_URL=http://localhost:8080
 python main.py
 ```
 
@@ -169,35 +174,7 @@ $env:PEER_URL="http://localhost:8080"
 python main.py
 ```
 
-## 8. Como Testar (com cURL)
-
-### Verificar saúde:
-
-```bash
-curl http://localhost:8080/health
-```
-
-### Long-polling (aguarda alteração de status):
-
-```bash
-curl http://localhost:8080/subscribe/status
-```
-
-### Simular falha:
-
-```bash
-curl -X POST http://localhost:8080/fall
-```
-
-### Enviar mensagem:
-
-```bash
-curl -X POST -H "Content-Type: application/json" \
--d '{"userId": 1, "groupId": 1, "content": "Olá do cURL!"}' \
-http://localhost:8080/messages
-```
-
-## 9. Autores
+## 8. Autores
 
 - Emanuel Silva
 - Emily Salum  
