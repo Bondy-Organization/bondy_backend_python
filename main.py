@@ -12,7 +12,7 @@ import bcrypt
 # A threading.Lock is used to ensure thread-safe access to these shared variables
 # because both the HTTP server's client handlers (separate threads)
 # and the SyncManager (separate thread) will be reading from and writing to them.
-state_lock = threading.Lock()
+state_lock = threading.RLock()
 _is_alive = True  # Indicates if the system is fundamentally operational
 _is_active = os.getenv('IS_ACTIVE', 'false').lower() == 'true' # Active in a cluster
 _peer_url = os.getenv('PEER_URL', None) # URL of a peer system for active/passive sync
